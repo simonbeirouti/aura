@@ -2,32 +2,8 @@
 trigger: always_on
 ---
 
-# daisyUI 5
-daisyUI 5 is a CSS library for Tailwind CSS 4
-daisyUI 5 provides class names for common UI components
+# daisyUI 5 usage rules
 
-- [daisyUI 5 docs](http://daisyui.com)
-- [Guide: How to use this file in LLMs and code editors](https://daisyui.com/docs/editor/)
-- [daisyUI 5 release notes](https://daisyui.com/docs/v5/)
-- [daisyUI 4 to 5 upgrade guide](https://daisyui.com/docs/upgrade/)
-
-## daisyUI 5 install notes
-[install guide](https://daisyui.com/docs/install/)
-1. daisyUI 5 requires Tailwind CSS 4
-2. `tailwind.config.js` file is deprecated in Tailwind CSS v4. do not use `tailwind.config.js`. Tailwind CSS v4 only needs `@import "tailwindcss";` in the CSS file if it's a node dependency.
-3. daisyUI 5 can be installed using `npm i -D daisyui@latest` and then adding `@plugin "daisyui";` to the CSS file
-4. daisyUI is suggested to be installed as a dependency but if you really want to use it from CDN, you can use Tailwind CSS and daisyUI CDN files:
-```html
-<link href="https://cdn.jsdelivr.net/npm/daisyui@5" rel="stylesheet" type="text/css" />
-<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
-```
-5. A CSS file with Tailwind CSS and daisyUI looks like this (if it's a node dependency)
-```css
-@import "tailwindcss";
-@plugin "daisyui";
-```
-
-## daisyUI 5 usage rules
 1. We can give styles to a HTML element by adding daisyUI class names to it. By adding a component class name, part class names (if there's any available for that component), and modifier class names (if there's any available for that component)
 2. Components can be customized using Tailwind CSS utility classes if the customization is not possible using the existing daisyUI classes. For example `btn px-10` sets a custom horizontal padding to a `btn`
 3. If customization of daisyUI styles using Tailwind CSS utility classes didn't work because of CSS specificity issues, you can use the `!` at the end of the Tailwind CSS utility class to override the existing styles. For example `btn bg-red-500!` sets a custom background color to a `btn` forcefully. This is a last resort solution and should be used sparingly
