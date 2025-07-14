@@ -1,2 +1,98 @@
 @import "tailwindcss";
 @plugin "daisyui";
+
+/* Inside-Out Styling System for Mobile-First, Desktop-Friendly Design */
+
+/* Base container with responsive edge spacing */
+.container-responsive {
+  @apply w-full max-w-6xl mx-auto px-[5vw] py-[5vh];
+}
+
+/* Content sections with responsive padding */
+.content-section {
+  @apply p-4 w-full md:p-8;
+}
+
+/* Full-width elements with internal padding to prevent edge touching */
+.full-width {
+  @apply w-full p-4 md:p-8;
+}
+
+/* Centered layout using Flexbox with responsive padding */
+.flex-container {
+  @apply flex justify-center items-center p-4 md:p-8;
+}
+
+/* Centered layout using Grid with responsive padding */
+.grid-container {
+  @apply grid place-items-center p-4 md:p-8;
+}
+
+/* Additional utility classes for inside-out approach */
+.section-spacing {
+  @apply space-y-4 md:space-y-6;
+}
+
+.card-container {
+  @apply w-full max-w-md mx-auto p-4 md:p-6;
+}
+
+.form-container {
+  @apply w-full max-w-lg mx-auto p-4 md:p-6;
+}
+
+/* Responsive text scaling */
+.text-responsive {
+  @apply text-sm md:text-base;
+}
+
+.heading-responsive {
+  @apply text-lg md:text-xl lg:text-2xl;
+}
+
+/* Mobile-First Safe Area Support */
+.pt-safe-top {
+  padding-top: env(safe-area-inset-top);
+}
+
+.pb-safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.pl-safe-left {
+  padding-left: env(safe-area-inset-left);
+}
+
+.pr-safe-right {
+  padding-right: env(safe-area-inset-right);
+}
+
+/* Enhanced safe area padding for mobile devices */
+.safe-area {
+  @apply px-4 py-3 md:px-6 md:py-4;
+  padding-left: max(1rem, env(safe-area-inset-left));
+  padding-right: max(1rem, env(safe-area-inset-right));
+}
+
+/* Mobile touch targets and enhanced mobile experience */
+.touch-target {
+  @apply min-h-[44px] min-w-[44px];
+}
+
+/* Prevent mobile zoom on input focus - minimum 16px font size */
+.input-mobile-safe {
+  @apply text-base;
+  font-size: 16px !important;
+}
+
+/* Mobile-first button sizing */
+.btn-mobile {
+  @apply btn min-h-[44px] px-4 py-2;
+}
+
+/* Sticky header with mobile considerations */
+.sticky-header {
+  position: sticky;
+  top: env(safe-area-inset-top);
+  z-index: 50;
+}
