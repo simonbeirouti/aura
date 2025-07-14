@@ -98,55 +98,32 @@
 </script>
 
 <!-- Mobile-First Layout with Safe Area Support -->
-<div class="min-h-screen bg-base-200">
-  <!-- Safe area top padding for mobile devices (iPhone notch, etc.) -->
-  <div class="pt-safe-top">
-    <div class="container-responsive">
-      <!-- Header with enhanced mobile styling -->
-      <header class="sticky top-0 z-10 mb-4">
-        <div
-          class="navbar bg-base-100/95 rounded-box shadow-lg safe-area backdrop-blur-sm"
-        >
-          <div class="flex-1">
-            <h1 class="heading-responsive font-bold text-primary">🔐 Aura</h1>
-            <div
-              class="badge badge-secondary badge-sm ml-2 hidden sm:inline-flex"
-            >
-              Secure
-            </div>
-          </div>
-          <div class="flex-none">
-            <button
-              class="btn btn-outline btn-sm btn-error"
-              onclick={logout}
-              disabled={isLoading}
-            >
-              {#if isLoading}
-                <span class="loading loading-spinner loading-xs"></span>
-              {:else}
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  class="h-4 w-4 sm:mr-1"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"
-                  />
-                </svg>
-                <span class="hidden sm:inline">Logout</span>
-              {/if}
-            </button>
-          </div>
+<div class="h-full bg-base-100 text-base-content safe-area-padding flex flex-col">
+  <!-- Header -->
+  <div class="sticky top-0 z-10 bg-base-100/80 backdrop-blur-sm border-b border-base-200 safe-area-padding-top flex-shrink-0">
+    <div class="container mx-auto px-4 py-3">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <span class="text-2xl">🔐</span>
+          <h1 class="text-xl font-bold text-primary">Aura</h1>
         </div>
-      </header>
+        <button
+          onclick={logout}
+          class="btn btn-ghost btn-sm text-error hover:bg-error/10"
+          disabled={isLoading}
+        >
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+          </svg>
+          Logout
+        </button>
+      </div>
+    </div>
+  </div>
 
-      <!-- Main Content with Mobile-First Design -->
-      <main class="section-spacing">
+  <!-- Scrollable Main Content -->
+  <div class="flex-1 overflow-y-auto">
+    <main class="container mx-auto px-4 py-6">
         <div class="grid gap-4 md:gap-6 lg:grid-cols-2">
           <!-- Welcome Section -->
           <section class="card bg-base-100 shadow-xl">
@@ -397,5 +374,4 @@
         </div>
       </main>
     </div>
-  </div>
 </div>

@@ -85,6 +85,20 @@
   font-size: 16px !important;
 }
 
+/* Prevent over-scroll and ensure full viewport coverage */
+html, body {
+  height: 100%;
+  overflow-x: hidden;
+  overscroll-behavior: none;
+}
+
+body {
+  position: fixed;
+  width: 100%;
+  height: 100vh;
+  height: 100dvh; /* Dynamic viewport height for mobile */
+}
+
 /* Mobile-first button sizing */
 .btn-mobile {
   @apply btn min-h-[44px] px-4 py-2;
