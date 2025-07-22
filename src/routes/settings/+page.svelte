@@ -4,22 +4,6 @@
     import { goto } from "$app/navigation";
     import { ArrowLeftIcon, LockKeyholeIcon, LogOutIcon, TrashIcon } from "lucide-svelte";
 
-    let authState: {
-        isAuthenticated: boolean;
-        isLoading: boolean;
-        user: any;
-        error: string | null;
-    } = {
-        isAuthenticated: false,
-        isLoading: true,
-        user: null,
-        error: null,
-    };
-
-    authStore.subscribe((state) => {
-        authState = state;
-    });
-
     async function handleSignOut() {
         await authStore.logout();
         goto("/");
@@ -37,7 +21,7 @@
             <div class="flex items-center gap-4">
                 <button
                     class="btn btn-ghost btn-sm"
-                    on:click={goBack}
+                    onclick={goBack}
                     aria-label="Go back to home page"
                 >
                     <ArrowLeftIcon class="w-4 h-4 mr-1" />
@@ -58,7 +42,7 @@
                             id="email-display"
                             type="email"
                             class="input input-bordered input-sm w-full"
-                            value={authState.user.email}
+                            value={$authStore.user?.email || ''}
                             readonly
                         />
                     </div>
@@ -78,7 +62,7 @@
                 <div class="flex flex-col sm:flex-row gap-3">
                     <button
                         class="btn btn-error btn-outline btn-sm flex-1"
-                        on:click={handleSignOut}
+                        onclick={handleSignOut}
                     >
                         <LogOutIcon class="w-4 h-4 mr-1" />
                         Sign Out

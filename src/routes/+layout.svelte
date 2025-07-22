@@ -5,21 +5,7 @@
   import Login from "../lib/components/Login.svelte";
   import { authStore } from "../lib/stores/supabaseAuth";
 
-  let authState: {
-    isAuthenticated: boolean;
-    isLoading: boolean;
-    user: any;
-    error: string | null;
-  } = {
-    isAuthenticated: false,
-    isLoading: true,
-    user: null,
-    error: null,
-  };
 
-  authStore.subscribe((state) => {
-    authState = state;
-  });
 
   onMount(async () => {
     await authStore.initialize();
@@ -30,14 +16,14 @@
   }
 </script>
 
-{#if authState.isLoading}
+{#if $authStore.isLoading}
   <div class="app-loading">
     <div class="text-center">
       <span class="loading loading-spinner loading-lg text-primary"></span>
       <p class="mt-4 text-lg">Loading...</p>
     </div>
   </div>
-{:else if authState.isAuthenticated}
+{:else if $authStore.isAuthenticated}
   <slot />
 {:else}
   <div class="app-screen">

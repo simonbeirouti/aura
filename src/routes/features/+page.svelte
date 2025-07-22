@@ -41,7 +41,7 @@
       <div class="flex items-center gap-4">
         <button
           class="btn btn-ghost btn-sm"
-          on:click={goBack}
+          onclick={goBack}
           aria-label="Go back to home page"
         >
           <ArrowLeftIcon class="w-4 h-4 mr-1" />

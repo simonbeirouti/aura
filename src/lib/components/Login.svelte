@@ -10,7 +10,8 @@
   let error = '';
   let successMessage = '';
 
-  async function handleSubmit() {
+  async function handleSubmit(event: SubmitEvent) {
+    event.preventDefault();
     if (!email || !password) {
       error = 'Please fill in all fields';
       return;
@@ -51,7 +52,7 @@
 
   function handleKeyDown(event: KeyboardEvent) {
     if (event.key === 'Enter') {
-      handleSubmit();
+      handleSubmit(event as any);
     }
   }
 
@@ -74,7 +75,7 @@
         {isSignUp ? 'Create Account' : 'Welcome Back'}
       </h2>
       
-      <form on:submit|preventDefault={handleSubmit} class="space-y-4">
+      <form onsubmit={handleSubmit} class="space-y-4">
         <!-- Email Input -->
         <div class="form-control">
           <label class="label" for="email-input">
@@ -84,8 +85,8 @@
             id="email-input"
             type="email"
             bind:value={email}
-            on:input={clearMessages}
-            on:keydown={handleKeyDown}
+            oninput={clearMessages}
+            onkeydown={handleKeyDown}
             placeholder="Enter your email"
             class="input input-bordered w-full"
             class:input-error={error}
@@ -104,8 +105,8 @@
             id="password-input"
             type="password"
             bind:value={password}
-            on:input={clearMessages}
-            on:keydown={handleKeyDown}
+            oninput={clearMessages}
+            onkeydown={handleKeyDown}
             placeholder="Enter your password"
             class="input input-bordered w-full"
             class:input-error={error}
@@ -162,7 +163,7 @@
       <div class="text-center">
         <button 
           type="button"
-          on:click={toggleMode}
+          onclick={toggleMode}
           class="btn btn-ghost btn-sm"
           disabled={loading}
         >

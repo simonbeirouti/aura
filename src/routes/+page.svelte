@@ -2,22 +2,6 @@
   import { CogIcon, PlayIcon } from "lucide-svelte";
   import AppLayout from "../lib/components/AppLayout.svelte";
   import { authStore } from "../lib/stores/supabaseAuth";
-
-  let authState: {
-    isAuthenticated: boolean;
-    isLoading: boolean;
-    user: any;
-    error: string | null;
-  } = {
-    isAuthenticated: false,
-    isLoading: true,
-    user: null,
-    error: null,
-  };
-
-  authStore.subscribe((state) => {
-    authState = state;
-  });
 </script>
 
 <AppLayout>
@@ -32,11 +16,11 @@
           explore.
         </p>
 
-        {#if authState.user}
+        {#if $authStore.user}
           <div class="bg-base-200 rounded-lg p-4 mb-6">
             <p class="text-sm text-base-content/60 mb-1">Signed in as</p>
             <p class="font-medium text-base-content">
-              {authState.user.email}
+              {$authStore.user.email}
             </p>
           </div>
         {/if}
