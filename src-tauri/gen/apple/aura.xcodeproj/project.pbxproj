@@ -3,7 +3,7 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 54;
+	objectVersion = 70;
 	objects = {
 
 /* Begin PBXBuildFile section */
@@ -16,6 +16,7 @@
 		CB50A056B95A876D0446318D /* assets in Resources */ = {isa = PBXBuildFile; fileRef = 76DD8F6F2FF59E53046CB37A /* assets */; };
 		D198DFE3B4A409728FC37BA2 /* WebKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 283DB933294B5A69B99DBAA8 /* WebKit.framework */; };
 		D254650B9B90B6D512B18292 /* UIKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A079A617FF3E9AADEC11C2CE /* UIKit.framework */; };
+		EB2DC54B72C378EFDC17C99D /* libapp.a in Resources */ = {isa = PBXBuildFile; fileRef = 4BBEFCDABDFA734BCE1A2DBA /* libapp.a */; };
 		EC59D940AC676B7F156F46FA /* Metal.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = DB19F5E5DB07B85329514224 /* Metal.framework */; };
 		F0E01FEC4FE668A91F416001 /* CoreGraphics.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 374494E7CDBDEE00C7104701 /* CoreGraphics.framework */; };
 		FA6B7EF8FBFF94FA5D804D79 /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 5402399697C120D9492E96A3 /* LaunchScreen.storyboard */; };
@@ -27,6 +28,7 @@
 		2883E0A95526BC59326D7C55 /* aura_iOS.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = aura_iOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		374494E7CDBDEE00C7104701 /* CoreGraphics.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreGraphics.framework; path = System/Library/Frameworks/CoreGraphics.framework; sourceTree = SDKROOT; };
 		3F56E05B091ACCC3D4EDC7DB /* aura_iOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = aura_iOS.entitlements; sourceTree = "<group>"; };
+		4BBEFCDABDFA734BCE1A2DBA /* libapp.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; path = libapp.a; sourceTree = "<group>"; };
 		4FF483A8861693397E39E2AE /* libapp.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; path = libapp.a; sourceTree = "<group>"; };
 		5402399697C120D9492E96A3 /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
 		74F79FB37356517C64CA0E10 /* main.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = main.mm; sourceTree = "<group>"; };
@@ -61,6 +63,14 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		16E944A4F4A499FEA544F04C /* debug */ = {
+			isa = PBXGroup;
+			children = (
+				4BBEFCDABDFA734BCE1A2DBA /* libapp.a */,
+			);
+			path = debug;
+			sourceTree = "<group>";
+		};
 		3882F7188C08DACD2D4FBD0B /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
@@ -79,6 +89,7 @@
 		3C00E9EF66F1C1926F634114 /* Externals */ = {
 			isa = PBXGroup;
 			children = (
+				FF48DF2AFC06A0AF64E9E900 /* arm64 */,
 			);
 			path = Externals;
 			sourceTree = "<group>";
@@ -142,12 +153,27 @@
 			path = aura;
 			sourceTree = "<group>";
 		};
+		FF48DF2AFC06A0AF64E9E900 /* arm64 */ = {
+			isa = PBXGroup;
+			children = (
+				16E944A4F4A499FEA544F04C /* debug */,
+			);
+			path = arm64;
+			sourceTree = "<group>";
+		};
 		FFB3F8DCFAC4120EA27B87E0 /* bindings */ = {
 			isa = PBXGroup;
 			children = (
 				B69C7BA41ED9A15342A99C3C /* bindings.h */,
 			);
 			path = bindings;
+			sourceTree = "<group>";
+		};
+		"TEMP_12D0F8E4-0478-4EF1-A448-B45BC553FA47" /* x86_64 */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			path = x86_64;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -181,8 +207,6 @@
 			attributes = {
 				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 1430;
-				TargetAttributes = {
-				};
 			};
 			buildConfigurationList = 9BFB9D4C029E6E47248AD28D /* Build configuration list for PBXProject "aura" */;
 			compatibilityVersion = "Xcode 14.0";
@@ -194,7 +218,7 @@
 			);
 			mainGroup = 5C98B3D410852F00864A3867;
 			minimizedProjectReferenceProxies = 1;
-			preferredProjectObjectVersion = 54;
+			preferredProjectObjectVersion = 70;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
@@ -211,6 +235,7 @@
 				7F7EE56DA1ADC0A87467511A /* Assets.xcassets in Resources */,
 				FA6B7EF8FBFF94FA5D804D79 /* LaunchScreen.storyboard in Resources */,
 				CB50A056B95A876D0446318D /* assets in Resources */,
+				EB2DC54B72C378EFDC17C99D /* libapp.a in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

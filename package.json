@@ -13,10 +13,14 @@
   },
   "license": "MIT",
   "dependencies": {
+    "@supabase/supabase-js": "^2.52.0",
     "@tailwindcss/vite": "^4.1.11",
     "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-http": "^2.5.1",
     "@tauri-apps/plugin-opener": "^2",
+    "@tauri-apps/plugin-store": "^2.3.0",
     "daisyui": "^5.0.46",
+    "lucide-svelte": "^0.525.0",
     "tailwindcss": "^4.1.11"
   },
   "devDependencies": {
