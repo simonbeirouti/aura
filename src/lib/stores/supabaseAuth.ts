@@ -37,22 +37,31 @@ function createAuthStore() {
 
   return {
     subscribe,
-    
+
     // Initialize auth state on app start
     async initialize() {
       update(state => ({ ...state, isLoading: true, error: null }));
-      
+
       try {
         // First, check current Supabase session
         const { data: { session: currentSession } } = await supabase.auth.getSession();
-        
+
         if (currentSession) {
-          // Store the current session tokens
-          await invoke('store_tokens', {
-            accessToken: currentSession.access_token,
-            refreshToken: currentSession.refresh_token
-          });
-          
+          try {
+            // Store the current session tokens
+
+            await invoke('store_tokens', {
+              tokens: {
+                accessToken: currentSession.access_token,
+                refreshToken: currentSession.refresh_token
+              }
+            });
+
+          } catch (tokenError) {
+            console.error('[Auth] Failed to store tokens during initialization:', tokenError);
+            // Continue anyway - token storage failure shouldn't block authentication
+          }
+
           update(state => ({
             ...state,
             isAuthenticated: true,
@@ -63,33 +72,35 @@ function createAuthStore() {
           }));
           return;
         }
-        
+
         // Check if we have stored tokens
         const hasSession = await invoke<boolean>('check_session');
-        
+
         if (hasSession) {
           const tokens = await invoke<{ access_token: string; refresh_token: string }>('get_tokens');
-          
+
           // Set session in Supabase client
           const { data, error } = await supabase.auth.setSession({
             access_token: tokens.access_token,
             refresh_token: tokens.refresh_token
           });
-          
+
           if (error) {
             // Clear invalid tokens
             await invoke('logout');
             update(state => ({ ...state, isAuthenticated: false, isLoading: false, error: error.message }));
             return;
           }
-          
+
           if (data.session) {
             // Update stored tokens if they were refreshed
             await invoke('store_tokens', {
-              accessToken: data.session.access_token,
-              refreshToken: data.session.refresh_token
+              tokens: {
+                accessToken: data.session.access_token,
+                refreshToken: data.session.refresh_token
+              }
             });
-            
+
             update(state => ({
               ...state,
               isAuthenticated: true,
@@ -101,10 +112,10 @@ function createAuthStore() {
             return;
           }
         }
-        
+
         // No valid session found
         update(state => ({ ...state, isAuthenticated: false, isLoading: false }));
-        
+
       } catch (error) {
         update(state => ({
           ...state,
@@ -118,25 +129,34 @@ function createAuthStore() {
     // Login with email and password
     async login(email: string, password: string) {
       update(state => ({ ...state, isLoading: true, error: null }));
-      
+
       try {
         const { data, error } = await supabase.auth.signInWithPassword({
           email,
           password
         });
-        
+
         if (error) {
           update(state => ({ ...state, isLoading: false, error: error.message }));
           return { success: false, error: error.message };
         }
-        
+
         if (data.session) {
-          // Store tokens securely
-          await invoke('store_tokens', {
-            accessToken: data.session.access_token,
-            refreshToken: data.session.refresh_token
-          });
-          
+          try {
+            // Store tokens securely
+
+            await invoke('store_tokens', {
+              tokens: {
+                accessToken: data.session.access_token,
+                refreshToken: data.session.refresh_token
+              }
+            });
+
+          } catch (tokenError) {
+            console.error('[Auth] Failed to store tokens:', tokenError);
+            // Continue anyway - token storage failure shouldn't block login
+          }
+
           update(state => ({
             ...state,
             isAuthenticated: true,
@@ -145,10 +165,11 @@ function createAuthStore() {
             session: data.session,
             error: null
           }));
-          
+
+
           return { success: true, message: undefined };
         }
-        
+
         return { success: false, error: 'No session returned' };
       } catch (error) {
         update(state => ({ ...state, isLoading: false, error: error instanceof Error ? error.message : 'Login failed' }));
@@ -159,25 +180,34 @@ function createAuthStore() {
     // Sign up with email and password
     async signUp(email: string, password: string) {
       update(state => ({ ...state, isLoading: true, error: null }));
-      
+
       try {
         const { data, error } = await supabase.auth.signUp({
           email,
           password
         });
-        
+
         if (error) {
           update(state => ({ ...state, isLoading: false, error: error.message }));
           return { success: false, error: error.message };
         }
-        
+
         if (data.session) {
-          // Store tokens securely
-          await invoke('store_tokens', {
-            accessToken: data.session.access_token,
-            refreshToken: data.session.refresh_token
-          });
-          
+          try {
+            // Store tokens securely
+
+            await invoke('store_tokens', {
+              tokens: {
+                accessToken: data.session.access_token,
+                refreshToken: data.session.refresh_token
+              }
+            });
+
+          } catch (tokenError) {
+            console.error('[Auth] Failed to store tokens:', tokenError);
+            // Continue anyway - token storage failure shouldn't block signup
+          }
+
           update(state => ({
             ...state,
             isAuthenticated: true,
@@ -186,10 +216,11 @@ function createAuthStore() {
             session: data.session,
             error: null
           }));
-          
+
+
           return { success: true, message: 'Account created successfully!' };
         }
-        
+
         return { success: false, error: 'Unexpected signup response' };
       } catch (error) {
         update(state => ({ ...state, isLoading: false, error: error instanceof Error ? error.message : 'Signup failed' }));
@@ -202,10 +233,10 @@ function createAuthStore() {
       try {
         // Sign out from Supabase
         const { error } = await supabase.auth.signOut();
-        
+
         // Clear stored tokens
         await invoke('logout');
-        
+
         // Update state
         update(state => ({
           ...state,
@@ -215,7 +246,7 @@ function createAuthStore() {
           session: null,
           error: null
         }));
-        
+
       } catch (error) {
         // Force local logout even if there's an error
         update(state => ({
@@ -233,29 +264,31 @@ function createAuthStore() {
     async refreshSession() {
       try {
         const { data, error } = await supabase.auth.refreshSession();
-        
+
         if (error) {
           // If refresh fails, logout
           await this.logout();
           return { success: false, error: error.message };
         }
-        
+
         if (data.session) {
           // Update stored tokens
           await invoke('update_tokens', {
-            accessToken: data.session.access_token,
-            refreshToken: data.session.refresh_token
+            tokens: {
+              accessToken: data.session.access_token,
+              refreshToken: data.session.refresh_token
+            }
           });
-          
+
           update(state => ({
             ...state,
             session: data.session,
             user: data.user
           }));
-          
+
           return { success: true, message: undefined };
         }
-        
+
         return { success: false, error: 'No session returned', message: undefined };
       } catch (error) {
         await this.logout();
