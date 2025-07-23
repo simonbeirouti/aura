@@ -6,59 +6,69 @@
   import { authStore } from "../lib/stores/supabaseAuth";
   import { databaseStore } from "../lib/stores/database";
 
-  let needsProfileSetup = false;
-  let checkingProfile = false;
+  let isLoading = true;
+  let needsOnboarding = false;
 
   onMount(async () => {
-    if ($authStore.isAuthenticated && $authStore.user) {
-      await checkUserProfile();
-    }
+    await checkOnboardingStatus();
   });
 
-  // Check if user needs to complete profile setup
-  async function checkUserProfile() {
-    if (!$authStore.user || checkingProfile) return;
-
-    checkingProfile = true;
-
+  async function checkOnboardingStatus() {
     try {
+      if (!$authStore.user) {
+        isLoading = false;
+        return;
+      }
+
       // Initialize database if needed
       if (!$databaseStore.isInitialized) {
         await databaseStore.initialize();
       }
 
-      // Check if user has a complete profile
+      // Check if user has completed onboarding
       const profile = await databaseStore.getUserProfile($authStore.user.id);
-
-      // User needs profile setup if they don't have a profile, haven't completed onboarding, 
+      
+      // User needs onboarding if they don't have a profile, haven't completed onboarding, 
       // or are missing required profile fields (full_name, username)
-      needsProfileSetup = !profile || 
-                        !profile.onboarding_complete || 
-                        !profile.full_name || 
-                        !profile.username || 
-                        profile.full_name.trim() === '' || 
-                        profile.username.trim() === '';
+      needsOnboarding = !profile || 
+                       !profile.onboarding_complete || 
+                       !profile.full_name || 
+                       !profile.username || 
+                       profile.full_name.trim() === '' || 
+                       profile.username.trim() === '';
     } catch (error) {
-      console.error("Failed to check user profile:", error);
-      // If we can't check, assume they need profile setup
-      needsProfileSetup = true;
+      console.error("Failed to check onboarding status:", error);
+      // If we can't check, assume they need onboarding
+      needsOnboarding = true;
     } finally {
-      checkingProfile = false;
+      isLoading = false;
     }
   }
 
   // Handle profile completion
   function handleProfileComplete() {
-    needsProfileSetup = false;
-  }
-
-  // Reactive check when auth state changes
-  $: if ($authStore.isAuthenticated && $authStore.user && !checkingProfile) {
-    checkUserProfile();
+    needsOnboarding = false;
   }
 </script>
 
-{#if needsProfileSetup}
+{#if isLoading}
+  <!-- Loading state while checking onboarding status -->
+  <div class="min-h-screen bg-base-200 flex items-center justify-center">
+    <div class="text-center space-y-6">
+      <div class="flex justify-center">
+        <span class="loading loading-spinner w-16 h-16 text-primary"></span>
+      </div>
+      <div class="space-y-2">
+        <p class="text-2xl font-semibold text-base-content">
+          Loading...
+        </p>
+        <p class="text-sm text-base-content/60">
+          Checking your profile
+        </p>
+      </div>
+    </div>
+  </div>
+{:else if needsOnboarding}
   <!-- Fullscreen Profile Setup -->
   <OnboardingProfile on:complete={handleProfileComplete} />
 {:else}
