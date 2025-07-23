@@ -1,12 +1,42 @@
 <script lang="ts">
+    import { onMount } from "svelte";
     import AppLayout from "../../lib/components/AppLayout.svelte";
     import { authStore } from "../../lib/stores/supabaseAuth";
+    import { databaseStore } from "../../lib/stores/database";
     import { goto } from "$app/navigation";
-    import { ArrowLeftIcon, LockKeyholeIcon, LogOutIcon, TrashIcon } from "lucide-svelte";
+    import {
+        ArrowLeftIcon,
+        LogOutIcon,
+        UserIcon,
+    } from "lucide-svelte";
+
+    let profile: any = null;
+    let isLoading = true;
+
+    onMount(async () => {
+        await loadProfile();
+    });
+
+    async function loadProfile() {
+        try {
+            if (!$authStore.user) return;
+            
+            // Initialize database if needed
+            if (!$databaseStore.isInitialized) {
+                await databaseStore.initialize();
+            }
+            
+            profile = await databaseStore.getUserProfile($authStore.user.id);
+        } catch (error) {
+            console.error("Failed to load profile:", error);
+        } finally {
+            isLoading = false;
+        }
+    }
 
     async function handleSignOut() {
         await authStore.logout();
-        goto("/");
+        // Don't use goto - let the layout handle the authentication state change
     }
 
     function goBack() {
@@ -17,7 +47,7 @@
 <AppLayout>
     <div class="w-full max-w-2xl mx-auto">
         <!-- Header -->
-        <div class="flex items-center justify-between mb-4">
+        <div class="flex items-center justify-between">
             <div class="flex items-center gap-4">
                 <button
                     class="btn btn-ghost btn-sm"
@@ -26,54 +56,68 @@
                 >
                     <ArrowLeftIcon class="w-4 h-4 mr-1" />
                 </button>
-                <h1 class="text-3xl font-bold text-primary">Settings</h1>
+                <h1 class="text-3xl font-bold text-primary">
+                    Settings
+                </h1>
             </div>
         </div>
 
-        <!-- Single Settings Card -->
-        <div class="card bg-base-100 shadow-xl">
-            <div class="card-body">
-                <!-- Account Section -->
-                <h2 class="text-xl font-bold">Account</h2>
-
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div class="form-control">
-                        <input
-                            id="email-display"
-                            type="email"
-                            class="input input-bordered input-sm w-full"
-                            value={$authStore.user?.email || ''}
-                            readonly
-                        />
+        {#if isLoading}
+            <!-- Loading state -->
+            <div class="flex justify-center items-center py-12">
+                <span class="loading loading-spinner w-8 h-8 text-primary"></span>
+            </div>
+        {:else}
+            <!-- Profile Information Card -->
+            <div class="card bg-base-100 shadow-xl">
+                <div class="card-body">
+                    <!-- Profile Display -->
+                    <div class="flex items-center gap-6 mb-6">
+                        <!-- Avatar -->
+                        <div class="avatar">
+                            <div class="w-40 h-40 rounded-lg">
+                                {#if profile?.avatar_url}
+                                    <img 
+                                        src={profile.avatar_url} 
+                                        alt="Profile avatar"
+                                        class="w-full h-full object-cover rounded-lg"
+                                    />
+                                {:else}
+                                    <div class="w-full h-full bg-base-300 rounded-lg flex items-center justify-center">
+                                        <UserIcon class="w-10 h-10 text-base-content/50" />
+                                    </div>
+                                {/if}
+                            </div>
+                        </div>
+                        
+                        <!-- Name and Username -->
+                        <div class="flex-1 text-center">
+                            <div class="space-y-2">
+                                <div>
+                                    <p class="text-sm text-base-content/60 mb-1">Full Name</p>
+                                    <p class="text-xl font-semibold text-base-content">
+                                        {profile?.full_name || 'Not set'}
+                                    </p>
+                                </div>
+                                <div>
+                                    <p class="text-sm text-base-content/60 mb-1">Username</p>
+                                    <p class="text-lg text-base-content">
+                                        @{profile?.username || 'Not set'}
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
                     </div>
-                </div>
 
-                <h2 class="text-xl font-bold">Security</h2>
-
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
-                    <button class="btn btn-outline btn-sm">
-                        <LockKeyholeIcon class="w-4 h-4 mr-1" />
-                        Change Password
-                    </button>
-                </div>
-
-                <h2 class="text-xl font-bold text-error">Danger Zone</h2>
-
-                <div class="flex flex-col sm:flex-row gap-3">
                     <button
-                        class="btn btn-error btn-outline btn-sm flex-1"
+                        class="btn btn-error btn-outline w-full"
                         onclick={handleSignOut}
                     >
-                        <LogOutIcon class="w-4 h-4 mr-1" />
+                        <LogOutIcon class="w-4 h-4 mr-2" />
                         Sign Out
-                    </button>
-
-                    <button class="btn btn-error btn-sm flex-1">
-                        <TrashIcon class="w-4 h-4 mr-1" />
-                        Delete Account
                     </button>
                 </div>
             </div>
-        </div>
+        {/if}
     </div>
 </AppLayout>

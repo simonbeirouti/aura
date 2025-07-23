@@ -1,6 +1,8 @@
-import { writable } from 'svelte/store';
 import { createClient, type AuthSession, type User } from '@supabase/supabase-js';
 import { invoke } from '@tauri-apps/api/core';
+import { sessionStore, sessionActions } from './sessionStore';
+import { storeManager } from './core/storeManager';
+import { loadingActions } from './loadingStore';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -13,219 +15,154 @@ if (!supabaseUrl || !supabaseAnonKey) {
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
-// Auth store interface
-interface AuthState {
-  isAuthenticated: boolean;
-  isLoading: boolean;
-  user: User | null;
-  session: AuthSession | null;
-  error: string | null;
-}
-
-// Initial state
-const initialState: AuthState = {
-  isAuthenticated: false,
-  isLoading: true,
-  user: null,
-  session: null,
-  error: null,
-};
-
-// Create the store
+// Enhanced auth store using new architecture
 function createAuthStore() {
-  const { subscribe, set, update } = writable<AuthState>(initialState);
-
   return {
-    subscribe,
-    
+    // Subscribe to session store for reactive updates
+    subscribe: sessionStore.subscribe,
+
     // Initialize auth state on app start
     async initialize() {
-      update(state => ({ ...state, isLoading: true, error: null }));
-      
+      loadingActions.showAuth('Initializing...');
+      await sessionActions.setLoading(true);
+      await sessionActions.setError(null);
+
       try {
-        // First, check current Supabase session
-        const { data: { session: currentSession } } = await supabase.auth.getSession();
+        // Initialize store manager first
+        await storeManager.initialize();
         
-        if (currentSession) {
-          // Store the current session tokens
-          await invoke('store_tokens', {
-            accessToken: currentSession.access_token,
-            refreshToken: currentSession.refresh_token
-          });
-          
-          update(state => ({
-            ...state,
-            isAuthenticated: true,
-            isLoading: false,
-            user: currentSession.user,
-            session: currentSession,
-            error: null
-          }));
-          return;
-        }
+        // Load session data from persistent store
+        await sessionActions.load();
         
-        // Check if we have stored tokens
-        const hasSession = await invoke<boolean>('check_session');
+        // Check if we have valid stored session
+        const hasValidSession = await sessionActions.hasValidSession();
         
-        if (hasSession) {
-          const tokens = await invoke<{ access_token: string; refresh_token: string }>('get_tokens');
-          
-          // Set session in Supabase client
-          const { data, error } = await supabase.auth.setSession({
-            access_token: tokens.access_token,
-            refresh_token: tokens.refresh_token
-          });
-          
-          if (error) {
-            // Clear invalid tokens
-            await invoke('logout');
-            update(state => ({ ...state, isAuthenticated: false, isLoading: false, error: error.message }));
-            return;
-          }
-          
-          if (data.session) {
-            // Update stored tokens if they were refreshed
-            await invoke('store_tokens', {
-              accessToken: data.session.access_token,
-              refreshToken: data.session.refresh_token
+        if (hasValidSession) {
+          // Try to restore session from stored tokens
+          const tokens = await sessionActions.getTokens();
+          if (tokens) {
+            // Set the Supabase session with stored tokens
+            const { data: { user }, error } = await supabase.auth.setSession({
+              access_token: tokens.accessToken,
+              refresh_token: tokens.refreshToken
             });
             
-            update(state => ({
-              ...state,
-              isAuthenticated: true,
-              isLoading: false,
-              user: data.user,
-              session: data.session,
-              error: null
-            }));
-            return;
+            if (user && !error) {
+              const { data: { session } } = await supabase.auth.getSession();
+              if (session) {
+                await sessionActions.setAuthenticated(user, session);
+                return;
+              }
+            }
           }
         }
         
-        // No valid session found
-        update(state => ({ ...state, isAuthenticated: false, isLoading: false }));
-        
+        // No valid session found, check current Supabase session
+        const { data: { session: currentSession } } = await supabase.auth.getSession();
+
+        if (currentSession) {
+          // Store the current session tokens
+          await sessionActions.setAuthenticated(currentSession.user, currentSession);
+        } else {
+          // No session found
+          await sessionActions.setUnauthenticated();
+        }
       } catch (error) {
-        update(state => ({
-          ...state,
-          isAuthenticated: false,
-          isLoading: false,
-          error: error instanceof Error ? error.message : 'Authentication initialization failed'
-        }));
+        console.error('Auth initialization failed:', error);
+        await sessionActions.setUnauthenticated(
+          error instanceof Error ? error.message : 'Authentication failed'
+        );
+      } finally {
+        loadingActions.hideAuth();
       }
     },
 
     // Login with email and password
     async login(email: string, password: string) {
-      update(state => ({ ...state, isLoading: true, error: null }));
-      
+      loadingActions.showAuth('Signing you in...');
+      await sessionActions.setLoading(true);
+      await sessionActions.setError(null);
+
       try {
         const { data, error } = await supabase.auth.signInWithPassword({
           email,
           password
         });
-        
+
         if (error) {
-          update(state => ({ ...state, isLoading: false, error: error.message }));
-          return { success: false, error: error.message };
+          await sessionActions.setError(error.message);
+          throw new Error(error.message);
         }
-        
-        if (data.session) {
-          // Store tokens securely
-          await invoke('store_tokens', {
-            accessToken: data.session.access_token,
-            refreshToken: data.session.refresh_token
-          });
-          
-          update(state => ({
-            ...state,
-            isAuthenticated: true,
-            isLoading: false,
-            user: data.user,
-            session: data.session,
-            error: null
-          }));
-          
-          return { success: true, message: undefined };
+
+        if (data.session && data.user) {
+          await sessionActions.setAuthenticated(data.user, data.session);
         }
-        
-        return { success: false, error: 'No session returned' };
       } catch (error) {
-        update(state => ({ ...state, isLoading: false, error: error instanceof Error ? error.message : 'Login failed' }));
-        return { success: false, error: error instanceof Error ? error.message : 'Login failed' };
+        console.error('Login failed:', error);
+        await sessionActions.setError(
+          error instanceof Error ? error.message : 'Login failed'
+        );
+        throw error;
+      } finally {
+        loadingActions.hideAuth();
       }
     },
 
     // Sign up with email and password
     async signUp(email: string, password: string) {
-      update(state => ({ ...state, isLoading: true, error: null }));
-      
+      loadingActions.showAuth('Creating your account...');
+      await sessionActions.setLoading(true);
+      await sessionActions.setError(null);
+
       try {
         const { data, error } = await supabase.auth.signUp({
           email,
           password
         });
-        
+
         if (error) {
-          update(state => ({ ...state, isLoading: false, error: error.message }));
-          return { success: false, error: error.message };
+          await sessionActions.setError(error.message);
+          throw new Error(error.message);
         }
-        
-        if (data.session) {
-          // Store tokens securely
-          await invoke('store_tokens', {
-            accessToken: data.session.access_token,
-            refreshToken: data.session.refresh_token
-          });
-          
-          update(state => ({
-            ...state,
-            isAuthenticated: true,
-            isLoading: false,
-            user: data.user,
-            session: data.session,
-            error: null
-          }));
-          
-          return { success: true, message: 'Account created successfully!' };
+
+        if (data.session && data.user) {
+          await sessionActions.setAuthenticated(data.user, data.session);
         }
-        
-        return { success: false, error: 'Unexpected signup response' };
       } catch (error) {
-        update(state => ({ ...state, isLoading: false, error: error instanceof Error ? error.message : 'Signup failed' }));
-        return { success: false, error: error instanceof Error ? error.message : 'Signup failed' };
+        console.error('Sign up failed:', error);
+        await sessionActions.setError(
+          error instanceof Error ? error.message : 'Sign up failed'
+        );
+        throw error;
+      } finally {
+        loadingActions.hideAuth();
       }
     },
 
     // Logout
     async logout() {
+      loadingActions.showAuth('Signing you out...');
+      
       try {
-        // Sign out from Supabase
-        const { error } = await supabase.auth.signOut();
+        // Sign out from Supabase first
+        await supabase.auth.signOut();
         
-        // Clear stored tokens
-        await invoke('logout');
-        
-        // Update state
-        update(state => ({
-          ...state,
-          isAuthenticated: false,
-          isLoading: false,
-          user: null,
-          session: null,
-          error: null
-        }));
-        
+        // Clear session store after Supabase signout
+        await sessionActions.setUnauthenticated();
       } catch (error) {
-        // Force local logout even if there's an error
-        update(state => ({
-          ...state,
-          isAuthenticated: false,
-          isLoading: false,
-          user: null,
-          session: null,
-          error: null
-        }));
+        console.error('Logout failed:', error);
+        // Force clear session even if Supabase signout fails
+        try {
+          await sessionActions.setUnauthenticated(
+            error instanceof Error ? error.message : 'Logout failed'
+          );
+        } catch (sessionError) {
+          console.error('Failed to clear session:', sessionError);
+          // Last resort: manually clear Supabase session
+          await supabase.auth.signOut({ scope: 'local' });
+        }
+      } finally {
+        loadingActions.hideAuth();
       }
     },
 
@@ -235,43 +172,29 @@ function createAuthStore() {
         const { data, error } = await supabase.auth.refreshSession();
         
         if (error) {
-          // If refresh fails, logout
-          await this.logout();
-          return { success: false, error: error.message };
+          throw new Error(error.message);
         }
         
-        if (data.session) {
-          // Update stored tokens
-          await invoke('update_tokens', {
-            accessToken: data.session.access_token,
-            refreshToken: data.session.refresh_token
-          });
-          
-          update(state => ({
-            ...state,
-            session: data.session,
-            user: data.user
-          }));
-          
-          return { success: true, message: undefined };
+        if (data.session && data.user) {
+          await sessionActions.setAuthenticated(data.user, data.session);
         }
-        
-        return { success: false, error: 'No session returned', message: undefined };
       } catch (error) {
+        console.error('Session refresh failed:', error);
+        // If refresh fails, logout
         await this.logout();
-        return { success: false, error: error instanceof Error ? error.message : 'Refresh failed' };
+        throw error;
       }
     },
 
     // Clear error
-    clearError() {
-      update(state => ({ ...state, error: null }));
+    async clearError() {
+      await sessionActions.setError(null);
     },
 
     // Get current user
     getCurrentUser() {
       return supabase.auth.getUser();
-    },
+    }
   };
 }
 
