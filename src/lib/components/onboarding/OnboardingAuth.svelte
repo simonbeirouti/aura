@@ -148,31 +148,23 @@
 
         try {
             if (isSignUp) {
-                const result = await authStore.signUp(
+                await authStore.signUp(
                     email.trim(),
                     password.trim(),
                 );
-                if (result.success) {
-                    toast.success(
-                        "Account created successfully! Please check your email to verify your account.",
-                    );
-                    // Dispatch success event to parent
-                    dispatch("authSuccess");
-                } else {
-                    toast.error(result.error || "Failed to create account");
-                }
+                toast.success(
+                    "Account created successfully! Please check your email to verify your account.",
+                );
+                // Dispatch success event to parent
+                dispatch("authSuccess");
             } else {
-                const result = await authStore.login(
+                await authStore.login(
                     email.trim(),
                     password.trim(),
                 );
-                if (result.success) {
-                    toast.success("Welcome back!");
-                    // Dispatch success event to parent
-                    dispatch("authSuccess");
-                } else {
-                    toast.error(result.error || "Failed to log in");
-                }
+                toast.success("Welcome back!");
+                // Dispatch success event to parent
+                dispatch("authSuccess");
             }
         } catch (error) {
             console.error("Auth error:", error);

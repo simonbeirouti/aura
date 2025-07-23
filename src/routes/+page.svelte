@@ -4,44 +4,74 @@
   import AppLayout from "../lib/components/AppLayout.svelte";
   import OnboardingProfile from "../lib/components/onboarding/OnboardingProfile.svelte";
   import { authStore } from "../lib/stores/supabaseAuth";
-  import { databaseStore } from "../lib/stores/database";
+  import { dataActions, dataStore } from "../lib/stores/dataStore";
+  import { loadingActions } from "../lib/stores/loadingStore";
 
-  let isLoading = true;
   let needsOnboarding = false;
+  let profileChecked = false;
 
   onMount(async () => {
-    await checkOnboardingStatus();
+    // Only check onboarding if user is authenticated
+    if ($authStore.isAuthenticated && $authStore.user) {
+      await checkOnboardingStatus();
+    } else {
+      profileChecked = true;
+    }
   });
 
   async function checkOnboardingStatus() {
+    if (!$authStore.user) {
+      profileChecked = true;
+      return;
+    }
+
+    // Check if we already have profile data in the store
+    const currentProfile = $dataStore.currentProfile;
+    if (currentProfile && currentProfile.id === $authStore.user.id) {
+      // We already have the profile data, no need to load
+      needsOnboarding = !currentProfile.onboarding_complete;
+      profileChecked = true;
+      return;
+    }
+
+    // Only show loading if we actually need to fetch data
+    let showedLoading = false;
+    
     try {
-      if (!$authStore.user) {
-        isLoading = false;
+      // Initialize data store if needed (this might be quick if already initialized)
+      if (!$dataStore.isInitialized) {
+        loadingActions.showProfile('Initializing...');
+        showedLoading = true;
+        await dataActions.initialize();
+      }
+
+      // Check if profile is now available after initialization
+      const storeProfile = $dataStore.currentProfile;
+      if (storeProfile && storeProfile.id === $authStore.user.id) {
+        needsOnboarding = !storeProfile.onboarding_complete;
+        profileChecked = true;
         return;
       }
 
-      // Initialize database if needed
-      if (!$databaseStore.isInitialized) {
-        await databaseStore.initialize();
+      // We need to fetch the profile
+      if (!showedLoading) {
+        loadingActions.showProfile('Loading your profile...');
+        showedLoading = true;
       }
 
-      // Check if user has completed onboarding
-      const profile = await databaseStore.getUserProfile($authStore.user.id);
+      const profile = await dataActions.getUserProfile($authStore.user.id, false);
       
-      // User needs onboarding if they don't have a profile, haven't completed onboarding, 
-      // or are missing required profile fields (full_name, username)
-      needsOnboarding = !profile || 
-                       !profile.onboarding_complete || 
-                       !profile.full_name || 
-                       !profile.username || 
-                       profile.full_name.trim() === '' || 
-                       profile.username.trim() === '';
+      // User needs onboarding if they don't have a profile or haven't completed onboarding
+      needsOnboarding = !profile || !profile.onboarding_complete;
     } catch (error) {
       console.error("Failed to check onboarding status:", error);
       // If we can't check, assume they need onboarding
       needsOnboarding = true;
     } finally {
-      isLoading = false;
+      profileChecked = true;
+      if (showedLoading) {
+        loadingActions.hideProfile();
+      }
     }
   }
 
@@ -51,23 +81,9 @@
   }
 </script>
 
-{#if isLoading}
-  <!-- Loading state while checking onboarding status -->
-  <div class="min-h-screen bg-base-200 flex items-center justify-center">
-    <div class="text-center space-y-6">
-      <div class="flex justify-center">
-        <span class="loading loading-spinner w-16 h-16 text-primary"></span>
-      </div>
-      <div class="space-y-2">
-        <p class="text-2xl font-semibold text-base-content">
-          Loading...
-        </p>
-        <p class="text-sm text-base-content/60">
-          Checking your profile
-        </p>
-      </div>
-    </div>
-  </div>
+{#if !profileChecked}
+  <!-- Wait for profile check to complete -->
+  <div></div>
 {:else if needsOnboarding}
   <!-- Fullscreen Profile Setup -->
   <OnboardingProfile on:complete={handleProfileComplete} />

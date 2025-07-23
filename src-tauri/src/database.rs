@@ -94,22 +94,26 @@ pub async fn get_user_profile(
 
     // Use HTTP request to Supabase REST API
     let client = reqwest::Client::new();
+    
+    let url = format!("{}/rest/v1/profiles", db_config.database_url);
+    let auth_header = format!("Bearer {}", db_config.access_token);
 
     let response = client
-        .get(&format!("{}/profiles", db_config.database_url))
-        .header(
-            "Authorization",
-            format!("Bearer {}", db_config.access_token),
-        )
-        .header("apikey", db_config.anon_key.clone())
+        .get(&url)
+        .header("Authorization", &auth_header)
+        .header("apikey", &db_config.anon_key)
         .query(&[("id", format!("eq.{}", user_id))])
         .query(&[("select", "*")])
         .send()
         .await
         .map_err(|e| format!("HTTP request failed: {}", e))?;
 
-    if !response.status().is_success() {
-        return Err(format!("Database query failed: {}", response.status()));
+    let status = response.status();
+    
+    if !status.is_success() {
+        // Get response body for debugging
+        let error_body = response.text().await.unwrap_or_else(|_| "Could not read error body".to_string());
+        return Err(format!("Database query failed: {} - {}", status, error_body));
     }
 
     let profiles: Vec<Profile> = response
@@ -169,7 +173,7 @@ pub async fn update_user_profile(
     let client = reqwest::Client::new();
 
     let response = client
-        .patch(&format!("{}/profiles", db_config.database_url))
+        .patch(&format!("{}/rest/v1/profiles", db_config.database_url))
         .header(
             "Authorization",
             format!("Bearer {}", db_config.access_token),
@@ -241,7 +245,7 @@ pub async fn create_user_profile(
     let client = reqwest::Client::new();
 
     let response = client
-        .post(&format!("{}/profiles", db_config.database_url))
+        .post(&format!("{}/rest/v1/profiles", db_config.database_url))
         .header(
             "Authorization",
             format!("Bearer {}", db_config.access_token),
@@ -288,7 +292,7 @@ pub async fn check_username_availability(
     let client = reqwest::Client::new();
 
     let response = client
-        .get(&format!("{}/profiles", db_config.database_url))
+        .get(&format!("{}/rest/v1/profiles", db_config.database_url))
         .header(
             "Authorization",
             format!("Bearer {}", db_config.access_token),

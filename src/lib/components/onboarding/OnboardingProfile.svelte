@@ -1,7 +1,7 @@
 <script lang="ts">
     import { createEventDispatcher } from "svelte";
     import { authStore } from "../../stores/supabaseAuth";
-    import { databaseStore } from "../../stores/database";
+    import { dataStore } from "../../stores/dataStore";
     import {
         uploadAvatar,
         validateImageFile,
@@ -83,7 +83,7 @@
         }
 
         try {
-            const isAvailable = await databaseStore.checkUsernameAvailability(
+            const isAvailable = await dataStore.checkUsernameAvailability(
                 profileData.username,
             );
             if (!isAvailable) {
@@ -140,7 +140,7 @@
             // Try to get existing profile first
             let existingProfile = null;
             try {
-                existingProfile = await databaseStore.getUserProfile(
+                existingProfile = await dataStore.getUserProfile(
                     $authStore.user.id,
                 );
             } catch (error) {
@@ -149,7 +149,7 @@
 
             if (existingProfile) {
                 // Update existing profile
-                await databaseStore.updateUserProfile($authStore.user.id, {
+                await dataStore.updateUserProfile($authStore.user.id, {
                     full_name: profilePayload.full_name,
                     username: profilePayload.username,
                     avatar_url: profilePayload.avatar_url,
@@ -157,16 +157,11 @@
                 });
             } else {
                 // Create new profile
-                await databaseStore.createUserProfile(
-                    $authStore.user.id,
-                    profilePayload.full_name,
-                    profilePayload.avatar_url,
-                    profilePayload.onboarding_complete,
-                );
-                
-                // Update with username (since createUserProfile doesn't accept username)
-                await databaseStore.updateUserProfile($authStore.user.id, {
+                await dataStore.createUserProfile($authStore.user.id, {
+                    full_name: profilePayload.full_name,
                     username: profilePayload.username,
+                    avatar_url: profilePayload.avatar_url,
+                    onboarding_complete: profilePayload.onboarding_complete,
                 });
             }
 
