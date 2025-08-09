@@ -11,6 +11,10 @@ export interface Profile {
   full_name?: string;
   avatar_url?: string;
   onboarding_complete?: boolean;
+  stripe_customer_id?: string;
+  subscription_id?: string;
+  subscription_status?: string;
+  subscription_period_end?: number;
 }
 
 // Data store state interface
@@ -196,6 +200,43 @@ class DataStore {
       }));
       return null;
     }
+  }
+
+  // Refresh current profile from database (bypass cache)
+  async refreshCurrentProfile(): Promise<Profile | null> {
+    return new Promise((resolve) => {
+      const unsubscribe = this.store.subscribe(async (state) => {
+        unsubscribe();
+        
+        if (!state.currentProfile?.id) {
+          console.warn('No current profile to refresh');
+          resolve(null);
+          return;
+        }
+
+        try {
+          // Force refresh from database (bypass cache)
+          const refreshedProfile = await this.getUserProfile(state.currentProfile.id, false);
+      
+      if (refreshedProfile) {
+        this.store.update(state => ({
+          ...state,
+          currentProfile: refreshedProfile,
+          error: null
+        }));
+      }
+      
+          resolve(refreshedProfile);
+        } catch (error) {
+          console.error('Failed to refresh current profile:', error);
+          this.store.update(state => ({
+            ...state,
+            error: `Failed to refresh profile: ${error}`
+          }));
+          resolve(null);
+        }
+      });
+    });
   }
 
   async getUserProfile(userId: string, useCache: boolean = true): Promise<Profile | null> {

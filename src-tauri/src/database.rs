@@ -11,6 +11,10 @@ pub struct Profile {
     pub full_name: Option<String>,
     pub avatar_url: Option<String>,
     pub onboarding_complete: Option<bool>,
+    pub stripe_customer_id: Option<String>,
+    pub subscription_id: Option<String>,
+    pub subscription_status: Option<String>,
+    pub subscription_period_end: Option<i64>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -351,4 +355,46 @@ pub async fn get_database_status(app: tauri::AppHandle) -> Result<HashMap<String
     }
 
     Ok(status)
+}
+
+/// Update user subscription status
+pub async fn update_subscription_status(
+    user_id: String,
+    stripe_customer_id: String,
+    subscription_id: String,
+    subscription_status: String,
+    subscription_period_end: i64,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
+    let db_config = get_authenticated_db(&app).await?;
+    let client = reqwest::Client::new();
+    
+    let url = format!("{}/rest/v1/profiles", db_config.database_url);
+    
+    let mut update_data = HashMap::new();
+    update_data.insert("stripe_customer_id", serde_json::json!(stripe_customer_id));
+    update_data.insert("subscription_id", serde_json::json!(subscription_id));
+    update_data.insert("subscription_status", serde_json::json!(subscription_status));
+    update_data.insert("subscription_period_end", serde_json::json!(subscription_period_end));
+    update_data.insert("updated_at", serde_json::json!(chrono::Utc::now().to_rfc3339()));
+    
+    let response = client
+        .patch(&url)
+        .header("Authorization", format!("Bearer {}", db_config.access_token))
+        .header("apikey", &db_config.anon_key)
+        .header("Content-Type", "application/json")
+        .header("Prefer", "return=minimal")
+        .query(&[("id", format!("eq.{}", user_id))])
+        .json(&update_data)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to send subscription update request: {}", e))?;
+    
+    if !response.status().is_success() {
+        let status = response.status();
+        let error_text = response.text().await.unwrap_or_default();
+        return Err(format!("Failed to update subscription status: {} - {}", status, error_text));
+    }
+    
+    Ok(())
 }
