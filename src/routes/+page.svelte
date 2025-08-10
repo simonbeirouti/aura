@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { CogIcon, PlayIcon, DollarSignIcon } from "lucide-svelte";
+  import { CogIcon, PlayIcon } from "lucide-svelte";
   import AppLayout from "../lib/components/AppLayout.svelte";
   import OnboardingProfile from "../lib/components/onboarding/OnboardingProfile.svelte";
   import { authStore } from "../lib/stores/supabaseAuth";
@@ -114,10 +114,6 @@
             <a href="/features" class="btn btn-primary btn-lg w-full">
               <PlayIcon class="w-5 h-5 mr-2" />
               Explore Features
-            </a>
-            <a href="/stripe-test" class="btn btn-primary btn-lg w-full">
-              <DollarSignIcon class="w-5 h-5 mr-2" />
-              Subscription
             </a>
             <a href="/settings" class="btn btn-outline btn-lg w-full">
               <CogIcon class="w-5 h-5 mr-2" />

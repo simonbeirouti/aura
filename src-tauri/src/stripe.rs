@@ -1,10 +1,11 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::str::FromStr;
 use stripe::{
     Client, CreateCustomer, CreatePaymentIntent, CreateSubscription, CreatePrice, CreateProduct,
     Customer, PaymentIntent, Subscription, Price, Product, Currency, UpdateSubscription,
     CreateSubscriptionItems, CreatePriceRecurring, CreatePriceRecurringInterval,
-    CustomerId, IdOrCreate,
+    CustomerId, IdOrCreate, ListCustomers,
 };
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -157,6 +158,49 @@ pub async fn create_stripe_customer(
         .map_err(|e| format!("Failed to create customer: {}", e))?;
 
     Ok(customer.id.to_string())
+}
+
+#[tauri::command]
+pub async fn get_or_create_customer(
+    email: String,
+    name: Option<String>,
+) -> Result<serde_json::Value, String> {
+    let client = get_stripe_client()?;
+    
+    // First try to find existing customer by email
+    let mut list_params = ListCustomers::new();
+    list_params.email = Some(&email);
+    list_params.limit = Some(1);
+    
+    let customers = Customer::list(&client, &list_params)
+        .await
+        .map_err(|e| format!("Failed to search for customer: {}", e))?;
+    
+    if let Some(customer) = customers.data.first() {
+        // Return existing customer
+        return Ok(serde_json::json!({
+            "id": customer.id.to_string(),
+            "email": customer.email,
+            "name": customer.name
+        }));
+    }
+    
+    // Create new customer if not found
+    let mut params = CreateCustomer::new();
+    params.email = Some(&email);
+    if let Some(customer_name) = name.as_ref() {
+        params.name = Some(customer_name);
+    }
+    
+    let customer = Customer::create(&client, params)
+        .await
+        .map_err(|e| format!("Failed to create customer: {}", e))?;
+
+    Ok(serde_json::json!({
+        "id": customer.id.to_string(),
+        "email": customer.email,
+        "name": customer.name
+    }))
 }
 
 #[tauri::command]
@@ -447,4 +491,118 @@ pub async fn setup_stripe_product(
         .map_err(|e| format!("Failed to create price: {}", e))?;
 
     Ok(format!("Product created successfully. Price ID: {}", price.id))
+}
+
+// Payment Method Management Commands
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PaymentMethodResponse {
+    pub id: String,
+    pub card_brand: String,
+    pub card_last4: String,
+    pub card_exp_month: i64,
+    pub card_exp_year: i64,
+    pub is_default: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SetupIntentResponse {
+    pub client_secret: String,
+    pub setup_intent_id: String,
+}
+
+// Create a setup intent for adding payment methods
+#[tauri::command]
+pub async fn create_setup_intent(
+    customer_id: String,
+) -> Result<SetupIntentResponse, String> {
+    let client = get_stripe_client()?;
+    
+    let mut params = stripe::CreateSetupIntent::new();
+    params.customer = Some(stripe::CustomerId::from_str(&customer_id).map_err(|e| format!("Invalid customer ID: {}", e))?);
+    params.payment_method_types = Some(vec!["card".to_string()]);
+    
+    let setup_intent = stripe::SetupIntent::create(&client, params)
+        .await
+        .map_err(|e| format!("Failed to create setup intent: {}", e))?;
+    
+    Ok(SetupIntentResponse {
+        client_secret: setup_intent.client_secret.unwrap_or_default(),
+        setup_intent_id: setup_intent.id.to_string(),
+    })
+}
+
+// Get customer's payment methods
+#[tauri::command]
+pub async fn get_customer_payment_methods(
+    customer_id: String,
+) -> Result<Vec<PaymentMethodResponse>, String> {
+    let client = get_stripe_client()?;
+    
+    let mut params = stripe::ListPaymentMethods::new();
+    params.customer = Some(stripe::CustomerId::from_str(&customer_id).map_err(|e| format!("Invalid customer ID: {}", e))?);
+    params.type_ = Some(stripe::PaymentMethodTypeFilter::Card);
+    
+    let payment_methods = stripe::PaymentMethod::list(&client, &params)
+        .await
+        .map_err(|e| format!("Failed to fetch payment methods: {}", e))?;
+    
+    let mut methods = Vec::new();
+    for pm in payment_methods.data {
+        if let Some(card) = pm.card {
+            methods.push(PaymentMethodResponse {
+                id: pm.id.to_string(),
+                card_brand: card.brand,
+                card_last4: card.last4,
+                card_exp_month: card.exp_month as i64,
+                card_exp_year: card.exp_year as i64,
+                is_default: false, // We'll determine this separately if needed
+            });
+        }
+    }
+    
+    Ok(methods)
+}
+
+// Delete a payment method
+#[tauri::command]
+pub async fn delete_payment_method(
+    payment_method_id: String,
+) -> Result<String, String> {
+    let client = get_stripe_client()?;
+    
+    let payment_method_id = stripe::PaymentMethodId::from_str(&payment_method_id)
+        .map_err(|e| format!("Invalid payment method ID: {}", e))?;
+    
+    stripe::PaymentMethod::detach(&client, &payment_method_id)
+        .await
+        .map_err(|e| format!("Failed to delete payment method: {}", e))?;
+    
+    Ok("Payment method deleted successfully".to_string())
+}
+
+// Set default payment method for customer
+#[tauri::command]
+pub async fn set_default_payment_method(
+    customer_id: String,
+    payment_method_id: String,
+) -> Result<String, String> {
+    let client = get_stripe_client()?;
+    
+    let customer_id = stripe::CustomerId::from_str(&customer_id)
+        .map_err(|e| format!("Invalid customer ID: {}", e))?;
+    let payment_method_id = stripe::PaymentMethodId::from_str(&payment_method_id)
+        .map_err(|e| format!("Invalid payment method ID: {}", e))?;
+    
+    let mut params = stripe::UpdateCustomer::new();
+    params.invoice_settings = Some(stripe::CustomerInvoiceSettings {
+        default_payment_method: Some(payment_method_id.to_string()),
+        ..Default::default()
+    });
+    
+    stripe::Customer::update(&client, &customer_id, params)
+        .await
+        .map_err(|e| format!("Failed to set default payment method: {}", e))?;
+    
+    Ok("Default payment method updated successfully".to_string())
 }

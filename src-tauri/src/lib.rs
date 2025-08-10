@@ -123,6 +123,7 @@ pub fn run() {
             stripe::get_stripe_publishable_key,
             stripe::create_payment_intent,
             stripe::create_stripe_customer,
+            stripe::get_or_create_customer,
             stripe::create_subscription,
             stripe::cancel_subscription,
             stripe::get_subscription_status,
@@ -130,7 +131,12 @@ pub fn run() {
             stripe::sync_all_user_subscriptions,
             stripe::setup_stripe_product,
             stripe::create_price_for_product,
-            stripe::get_product_with_prices
+            stripe::get_product_with_prices,
+            // Payment method management commands
+            stripe::create_setup_intent,
+            stripe::get_customer_payment_methods,
+            stripe::delete_payment_method,
+            stripe::set_default_payment_method
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

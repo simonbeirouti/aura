@@ -6,8 +6,13 @@
     import { goto } from "$app/navigation";
     import {
         ArrowLeftIcon,
-        LogOutIcon,
         UserIcon,
+        CreditCardIcon,
+        Users,
+        Gift,
+        FileText,
+        ChevronRight,
+        LogOut,
     } from "lucide-svelte";
 
     let profile: any = null;
@@ -34,20 +39,24 @@
         }
     }
 
+    function goBack() {
+        goto("/");
+    }
+
     async function handleSignOut() {
         await authStore.logout();
         // Don't use goto - let the layout handle the authentication state change
     }
 
-    function goBack() {
-        goto("/");
+    function navigateTo(path: string) {
+        goto(path);
     }
 </script>
 
 <AppLayout>
     <div class="w-full max-w-2xl mx-auto">
         <!-- Header -->
-        <div class="flex items-center justify-between">
+        <div class="flex items-center justify-between mb-2">
             <div class="flex items-center gap-4">
                 <button
                     class="btn btn-ghost btn-sm"
@@ -69,10 +78,10 @@
             </div>
         {:else}
             <!-- Profile Information Card -->
-            <div class="card bg-base-100 shadow-xl">
+            <div class="card bg-red-100 shadow-x mb-6">
                 <div class="card-body">
                     <!-- Profile Display -->
-                    <div class="flex items-center gap-6 mb-6">
+                    <div class="flex items-center gap-6">
                         <!-- Avatar -->
                         <div class="avatar">
                             <div class="w-40 h-40 rounded-lg">
@@ -84,14 +93,14 @@
                                     />
                                 {:else}
                                     <div class="w-full h-full bg-base-300 rounded-lg flex items-center justify-center">
-                                        <UserIcon class="w-10 h-10 text-base-content/50" />
+                                        <UserIcon class="w-8 h-8 text-base-content/50" />
                                     </div>
                                 {/if}
                             </div>
                         </div>
                         
                         <!-- Name and Username -->
-                        <div class="flex-1 text-center">
+                        <div class="flex-1 text-left">
                             <div class="space-y-2">
                                 <div>
                                     <p class="text-sm text-base-content/60 mb-1">Full Name</p>
@@ -108,15 +117,31 @@
                             </div>
                         </div>
                     </div>
-
-                    <button
-                        class="btn btn-error btn-outline w-full"
-                        onclick={handleSignOut}
-                    >
-                        <LogOutIcon class="w-4 h-4 mr-2" />
-                        Sign Out
-                    </button>
                 </div>
+            </div>
+
+            <!-- Navigation Links -->
+            <div class="space-y-2">
+                <!-- Payment Methods -->
+                <button 
+                    class="w-full flex items-center justify-between p-4 bg-base-100 hover:bg-base-200 rounded-lg transition-colors"
+                    onclick={() => navigateTo('/settings/payment-methods')}
+                >
+                    <div class="flex items-center gap-3">
+                        <CreditCardIcon class="w-5 h-5 text-base-content/70" />
+                        <span class="text-base-content font-medium">Payment methods</span>
+                    </div>
+                    <ChevronRight class="w-5 h-5 text-base-content/40" />
+                </button>
+
+                <!-- Logout -->
+                <button 
+                    class="w-full flex items-center gap-3 p-4 text-left hover:bg-base-200 rounded-lg transition-colors"
+                    onclick={handleSignOut}
+                >
+                    <LogOut class="w-5 h-5 text-base-content/70" />
+                    <span class="text-base-content font-medium">Log out</span>
+                </button>
             </div>
         {/if}
     </div>
