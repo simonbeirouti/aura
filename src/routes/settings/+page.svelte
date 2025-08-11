@@ -2,7 +2,7 @@
     import { onMount } from "svelte";
     import AppLayout from "../../lib/components/AppLayout.svelte";
     import { authStore } from "../../lib/stores/supabaseAuth";
-    import { databaseStore } from "../../lib/stores/database";
+    import { settingsActions, profileStore } from "../../lib/stores/settingsStore";
     import { goto } from "$app/navigation";
     import {
         ArrowLeftIcon,
@@ -18,29 +18,18 @@
     import { Button } from "$lib/components/ui/button";
     import ModeToggle from "../../lib/components/ModeToggle.svelte";
 
-    let profile: any = null;
-    let isLoading = true;
+    // Reactive profile data from store
+    $: ({ profile, loading: isLoading, error } = $profileStore);
 
     onMount(async () => {
-        await loadProfile();
+        // Load profile data (will use cache if available)
+        await settingsActions.loadProfile();
+        
+        // Start background refresh after initial load
+        setTimeout(() => {
+            settingsActions.refreshProfileInBackground();
+        }, 100);
     });
-
-    async function loadProfile() {
-        try {
-            if (!$authStore.user) return;
-            
-            // Initialize database if needed
-            if (!$databaseStore.isInitialized) {
-                await databaseStore.initialize();
-            }
-            
-            profile = await databaseStore.getUserProfile($authStore.user.id);
-        } catch (error) {
-            console.error("Failed to load profile:", error);
-        } finally {
-            isLoading = false;
-        }
-    }
 
     function goBack() {
         goto("/");

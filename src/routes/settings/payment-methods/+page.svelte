@@ -3,12 +3,12 @@
   import { invoke } from '@tauri-apps/api/core';
   import { goto } from '$app/navigation';
   import { authStore } from '$lib/stores/supabaseAuth';
-  import { ArrowLeft, CreditCard, Plus, Trash2, MoreHorizontal } from 'lucide-svelte';
+  import { settingsActions, paymentMethodsStore, type PaymentMethod } from '$lib/stores/settingsStore';
+  import { CreditCard, Plus } from 'lucide-svelte';
   import AppLayout from '$lib/components/AppLayout.svelte';
-  import { Card, CardContent, CardHeader, CardTitle } from '$lib/components/ui/card';
+  import { Card, CardContent } from '$lib/components/ui/card';
   import { Button } from '$lib/components/ui/button';
   import { Badge } from '$lib/components/ui/badge';
-  import { Input } from '$lib/components/ui/input';
   import { Label } from '$lib/components/ui/label';
   import {
     Drawer,
@@ -17,37 +17,20 @@
     DrawerFooter,
     DrawerHeader,
     DrawerTitle,
-    DrawerTrigger,
     DrawerClose
   } from '$lib/components/ui/drawer';
   import { loadStripe, type Stripe, type StripeElements } from '@stripe/stripe-js';
-  
-  interface PaymentMethod {
-    id: string;
-    user_id: string;
-    stripe_payment_method_id: string;
-    card_brand: string;
-    card_last4: string;
-    card_exp_month: number;
-    card_exp_year: number;
-    is_default: boolean;
-    is_active: boolean;
-    created_at?: string;
-    updated_at?: string;
-    last_used_at?: string;
-  }
 
   interface SetupIntentResponse {
     client_secret: string;
     setup_intent_id: string;
   }
 
-  let customerId = '';
+  // Reactive data from store
+  $: ({ paymentMethods, loading, error: loadError, customerId } = $paymentMethodsStore);
+  
   let userId = '';
-  let loading = true;
   let error = '';
-  let loadError = '';
-  let paymentMethods: PaymentMethod[] = [];
   let isDrawerOpen = false;
   let isEditDrawerOpen = false;
   let selectedPaymentMethod: PaymentMethod | null = null;
@@ -67,80 +50,35 @@
   let cvcContainer: HTMLElement;
 
   onMount(async () => {
-    console.log('Payment methods page: Starting initialization...');
-    
     try {
-      // Get current user information using the same approach as settings page
-      console.log('Payment methods page: Getting current user from authStore...');
-      console.log('Payment methods page: $authStore.user:', $authStore.user);
-      
       if (!$authStore.user) {
-        console.error('Payment methods page: User not found in authStore');
         throw new Error('User not authenticated');
       }
 
       // Store user ID for database operations
       userId = $authStore.user.id;
-      console.log('Payment methods page: User ID from authStore:', userId);
 
-      console.log('Payment methods page: User authenticated, getting customer...');
-      // Get or create customer with user information
-      const customer = await invoke<{id: string}>('get_or_create_customer', {
-        email: $authStore.user.email || '',
-        name: $authStore.user.user_metadata?.full_name || $authStore.user.email || 'Unknown User'
-      });
-      customerId = customer.id;
-      console.log('Payment methods page: Customer ID:', customerId);
+      // Initialize customer (this will be cached in the store)
+      await settingsActions.initializeCustomer();
       
-      console.log('Payment methods page: Loading payment methods...');
-      await loadPaymentMethods();
+      // Load payment methods (will use cache if available)
+      await settingsActions.loadPaymentMethods();
       
-      console.log('Payment methods page: Initializing Stripe...');
+      // Initialize Stripe
       await initializeStripe();
       
-      console.log('Payment methods page: Initialization complete');
+      // Start background refresh after initial load
+      setTimeout(() => {
+        settingsActions.refreshPaymentMethodsInBackground();
+      }, 100);
+      
     } catch (err) {
       console.error('Payment methods page: Initialization failed:', err);
-      loadError = `Failed to initialize payment system: ${err instanceof Error ? err.message : String(err)}`;
-    } finally {
-      console.log('Payment methods page: Setting loading to false');
-      loading = false;
+      error = `Failed to initialize payment system: ${err instanceof Error ? err.message : String(err)}`;
     }
   });
 
-  async function loadPaymentMethods() {
-    if (!userId) {
-      console.error('Cannot load payment methods: User ID not available');
-      return;
-    }
-    
-    try {
-      console.log('Loading payment methods for user:', userId);
-      // Use the new database-backed function that's scoped to the user
-      paymentMethods = await invoke<PaymentMethod[]>('get_stored_payment_methods', {
-        userId
-      });
-      console.log('Loaded payment methods:', paymentMethods.length);
-      loadError = ''; // Clear any previous load errors
-    } catch (err) {
-      console.error('Failed to load payment methods:', err);
-      loadError = 'Failed to load payment methods';
-      // Fallback to Stripe API if database fails
-      if (customerId) {
-        try {
-          console.log('Falling back to Stripe API...');
-          paymentMethods = await invoke<PaymentMethod[]>('list_payment_methods', {
-            customerId
-          });
-          console.log('Fallback successful, loaded from Stripe:', paymentMethods.length);
-          loadError = ''; // Clear error if fallback works
-        } catch (fallbackErr) {
-          console.error('Fallback to Stripe also failed:', fallbackErr);
-          loadError = 'Failed to load payment methods from both database and Stripe';
-        }
-      }
-    }
-  }
+
 
   async function initializeStripe() {
     try {
@@ -222,13 +160,10 @@
     
     try {
       // First, create the payment method using the card element
-      console.log('[DEBUG] Creating payment method with Stripe...');
       const { error: paymentMethodError, paymentMethod } = await stripe.createPaymentMethod({
         type: 'card',
         card: cardNumberElement,
       });
-      
-      console.log('[DEBUG] Stripe createPaymentMethod result:', { paymentMethodError, paymentMethod });
       
       if (paymentMethodError) {
         throw new Error(paymentMethodError.message);
@@ -261,7 +196,7 @@
       }
       
       // Reload payment methods from database
-      await loadPaymentMethods();
+      await settingsActions.loadPaymentMethods(true);
       
       // Close drawer and reset form
       isDrawerOpen = false;
@@ -289,16 +224,13 @@
     }
     
     try {
-      console.log('Deleting payment method for user:', userId, 'payment method:', paymentMethodId);
       // Use the integrated function that removes from both Stripe and database
       await invoke('delete_payment_method_integrated', {
         paymentMethodId,
         userId
       });
-      
-      console.log('Payment method deleted successfully');
       // Reload payment methods from database
-      await loadPaymentMethods();
+      await settingsActions.loadPaymentMethods(true);
     } catch (err) {
       console.error('Failed to delete payment method:', err);
       error = 'Failed to delete payment method';
@@ -313,17 +245,14 @@
     }
     
     try {
-      console.log('Setting default payment method for user:', userId, 'payment method:', paymentMethodId);
       // Use the integrated function that updates both Stripe and database
       await invoke('set_default_payment_method_integrated', {
         customerId,
         paymentMethodId,
         userId
       });
-      
-      console.log('Default payment method set successfully');
       // Reload payment methods from database
-      await loadPaymentMethods();
+      await settingsActions.loadPaymentMethods(true);
     } catch (err) {
       console.error('Failed to set default payment method:', err);
       error = 'Failed to set default payment method';
@@ -377,7 +306,6 @@
             cardCvcElement.mount(cvcContainer);
             return true;
           } catch (err) {
-            console.log('Remounting elements (expected on first mount):', err);
             // Try mounting without unmounting (for first time)
             cardNumberElement.mount(cardContainer);
             cardExpiryElement.mount(expiryContainer);
@@ -544,7 +472,7 @@
                 <div>
                   <div class="flex items-center gap-2">
                     <span class="font-medium text-sm">
-                      {method.card_brand.toUpperCase()} •••• {method.card_last4}
+                      {method.card_brand.toUpperCase()} {method.card_last4}
                     </span>
                     {#if method.is_default}
                       <Badge variant="default" class="text-xs">Default</Badge>
