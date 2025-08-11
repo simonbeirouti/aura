@@ -108,6 +108,13 @@ pub fn run() {
             database::create_user_profile,
             database::check_username_availability,
             database::get_database_status,
+            database::update_subscription_status,
+            // Payment method database commands
+            database::store_payment_method,
+            database::get_user_payment_methods,
+            database::update_payment_method,
+            database::delete_payment_method_from_db,
+            database::mark_payment_method_used,
             // Enhanced store management commands
             enhanced_store::store_get,
             enhanced_store::store_set,
@@ -135,8 +142,16 @@ pub fn run() {
             // Payment method management commands
             stripe::create_setup_intent,
             stripe::get_customer_payment_methods,
+            stripe::list_payment_methods,
             stripe::delete_payment_method,
-            stripe::set_default_payment_method
+            stripe::set_default_payment_method,
+            // Integrated payment method commands (Stripe + Database)
+            stripe::create_and_store_payment_method,
+            stripe::store_payment_method_after_setup,
+            stripe::get_stored_payment_methods,
+            stripe::set_default_payment_method_integrated,
+            stripe::delete_payment_method_integrated,
+            stripe::create_payment_intent_with_stored_method
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

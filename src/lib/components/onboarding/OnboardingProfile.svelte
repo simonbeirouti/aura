@@ -196,16 +196,16 @@
 </script>
 
 <!-- Profile Setup Layout matching steps 1 & 2 -->
-<div class="min-h-screen bg-base-100 flex flex-col relative">
+<div class="min-h-screen bg-background flex flex-col relative">
     <!-- Main Content Container -->
     <div class="flex-1 flex flex-col justify-between items-center px-8 py-16">
         <!-- Top Section: Profile Form -->
         <div class="flex-1 flex flex-col justify-center items-center max-w-md mx-auto">
             <div class="text-center">
-                <h2 class="text-3xl font-bold text-base-content mb-6">
+                <h2 class="text-3xl font-bold text-foreground mb-6">
                     Set up your profile
                 </h2>
-                <p class="text-lg text-base-content/80 leading-relaxed mb-8">
+                <p class="text-lg text-muted-foreground leading-relaxed mb-8">
                     Tell us a bit about yourself to personalize your
                     experience
                 </p>
@@ -220,7 +220,7 @@
                             disabled={isUploading}
                         >
                             <div
-                                class="w-40 h-40 rounded-full bg-base-200 border-2 border-dashed border-base-300 hover:border-primary transition-colors flex items-center justify-center"
+                                class="w-40 h-40 rounded-full bg-muted border-2 border-dashed border-border hover:border-primary transition-colors flex items-center justify-center"
                             >
                                 {#if avatarPreview}
                                     <img
@@ -234,13 +234,13 @@
                                     />
                                 {:else}
                                     <CameraIcon
-                                        class="w-6 h-6 text-base-content/50"
+                                        class="w-6 h-6 text-muted-foreground"
                                     />
                                 {/if}
                             </div>
                         </button>
                         <p
-                            class="text-xs text-base-content/50 text-center"
+                            class="text-xs text-muted-foreground text-center"
                         >
                             Click to add a profile photo
                         </p>
@@ -258,11 +258,11 @@
                     <!-- Form Fields -->
                     <div class="space-y-4">
                         <!-- Full Name -->
-                        <div class="form-control">
+                        <div class="space-y-2">
                             <input
                                 id="full-name-input"
                                 type="text"
-                                class="input input-bordered w-full"
+                                class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                                 bind:value={profileData.full_name}
                                 placeholder="Enter your full name"
                                 required
@@ -270,12 +270,12 @@
                         </div>
 
                         <!-- Username -->
-                        <div class="form-control">
+                        <div class="space-y-2">
                             <input
                                 id="username-input"
                                 type="text"
-                                class="input input-bordered w-full {usernameError
-                                    ? 'input-error'
+                                class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 {usernameError
+                                    ? 'border-destructive'
                                     : ''}"
                                 bind:value={profileData.username}
                                 placeholder="Choose a username"
@@ -283,20 +283,16 @@
                                 required
                             />
                             {#if usernameError}
-                                <div class="label">
-                                    <span
-                                        class="label-text-alt text-error"
-                                    >
-                                        {usernameError}
-                                    </span>
+                                <div class="text-sm text-destructive mt-1">
+                                    {usernameError}
                                 </div>
                             {/if}
                         </div>
                     </div>
 
                     {#if uploadError}
-                        <div class="alert alert-error">
-                            <span>{uploadError}</span>
+                        <div class="rounded-lg border border-destructive bg-destructive/10 p-3 text-sm text-destructive">
+                            {uploadError}
                         </div>
                     {/if}
                 </div>
@@ -307,7 +303,7 @@
         <div class="w-full mx-auto">
             <div class="flex justify-center items-center px-2 pb-12">
                 <button
-                    class="btn btn-primary btn-lg px-8"
+                    class="inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-primary text-primary-foreground hover:bg-primary/90 h-11 px-8"
                     onclick={() => completeOnboarding(false)}
                     disabled={isSaving ||
                         !profileData.full_name ||

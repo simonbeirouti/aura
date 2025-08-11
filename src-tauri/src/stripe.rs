@@ -537,15 +537,31 @@ pub async fn create_setup_intent(
 pub async fn get_customer_payment_methods(
     customer_id: String,
 ) -> Result<Vec<PaymentMethodResponse>, String> {
-    let client = get_stripe_client()?;
+    println!("[Stripe] Getting payment methods for customer: {}", customer_id);
+    
+    let client = get_stripe_client().map_err(|e| {
+        println!("[Stripe] Failed to get Stripe client: {}", e);
+        e
+    })?;
     
     let mut params = stripe::ListPaymentMethods::new();
-    params.customer = Some(stripe::CustomerId::from_str(&customer_id).map_err(|e| format!("Invalid customer ID: {}", e))?);
+    params.customer = Some(stripe::CustomerId::from_str(&customer_id).map_err(|e| {
+        let error = format!("Invalid customer ID: {}", e);
+        println!("[Stripe] {}", error);
+        error
+    })?);
     params.type_ = Some(stripe::PaymentMethodTypeFilter::Card);
     
+    println!("[Stripe] Calling Stripe API to list payment methods...");
     let payment_methods = stripe::PaymentMethod::list(&client, &params)
         .await
-        .map_err(|e| format!("Failed to fetch payment methods: {}", e))?;
+        .map_err(|e| {
+            let error = format!("Failed to fetch payment methods: {}", e);
+            println!("[Stripe] {}", error);
+            error
+        })?;
+    
+    println!("[Stripe] Found {} payment methods", payment_methods.data.len());
     
     let mut methods = Vec::new();
     for pm in payment_methods.data {
@@ -561,7 +577,17 @@ pub async fn get_customer_payment_methods(
         }
     }
     
+    println!("[Stripe] Returning {} processed payment methods", methods.len());
     Ok(methods)
+}
+
+// Alias for frontend compatibility
+#[tauri::command]
+pub async fn list_payment_methods(
+    customer_id: String,
+) -> Result<Vec<PaymentMethodResponse>, String> {
+    println!("[Stripe] list_payment_methods called with customer_id: {}", customer_id);
+    get_customer_payment_methods(customer_id).await
 }
 
 // Delete a payment method
@@ -605,4 +631,167 @@ pub async fn set_default_payment_method(
         .map_err(|e| format!("Failed to set default payment method: {}", e))?;
     
     Ok("Default payment method updated successfully".to_string())
+}
+
+// Enhanced payment method functions that integrate with database storage
+
+/// Create setup intent and store payment method metadata after successful setup
+#[tauri::command]
+pub async fn create_and_store_payment_method(
+    customer_id: String,
+    _user_id: String,
+    _app: tauri::AppHandle,
+) -> Result<SetupIntentResponse, String> {
+    // First create the setup intent
+    let setup_intent = create_setup_intent(customer_id.clone()).await?;
+    
+    // The actual payment method will be stored after the frontend confirms the setup intent
+    // This function just returns the setup intent for the frontend to complete
+    Ok(setup_intent)
+}
+
+/// Store payment method metadata after successful Stripe setup intent confirmation
+#[tauri::command]
+pub async fn store_payment_method_after_setup(
+    customer_id: String,
+    payment_method_id: String,
+    user_id: String,
+    is_default: Option<bool>,
+    app: tauri::AppHandle,
+) -> Result<crate::database::PaymentMethod, String> {
+    let client = get_stripe_client()?;
+    
+    let pm_id = stripe::PaymentMethodId::from_str(&payment_method_id).map_err(|e| {
+        format!("Invalid payment method ID: {}", e)
+    })?;
+    
+    let payment_method = stripe::PaymentMethod::retrieve(&client, &pm_id, &[]).await.map_err(|e| {
+        format!("Stripe API error: {}", e)
+    })?;
+    
+    // Extract card details for storage (non-sensitive metadata only)
+    let (card_brand, card_last4, card_exp_month, card_exp_year) = match &payment_method.card {
+        Some(card) => {
+            // Convert brand to lowercase string without quotes
+            // The card.brand is already a String, so we just need to convert it to lowercase
+            let brand = card.brand.to_lowercase();
+            let last4 = card.last4.clone();
+            let exp_month = card.exp_month as i32;
+            let exp_year = card.exp_year as i32;
+            (brand, last4, exp_month, exp_year)
+        },
+        None => {
+            return Err("Payment method does not have card details".to_string());
+        },
+    };
+    
+    // Store in database using the database module function
+    crate::database::store_payment_method(
+        user_id.clone(),
+        payment_method_id.clone(),
+        card_brand.clone(),
+        card_last4.clone(),
+        card_exp_month,
+        card_exp_year,
+        is_default,
+        app,
+    ).await
+}
+
+/// Get user's payment methods from database (faster than Stripe API)
+#[tauri::command]
+pub async fn get_stored_payment_methods(
+    user_id: String,
+    app: tauri::AppHandle,
+) -> Result<Vec<crate::database::PaymentMethod>, String> {
+    crate::database::get_user_payment_methods(user_id, app).await
+}
+
+/// Set payment method as default in both Stripe and database
+#[tauri::command]
+pub async fn set_default_payment_method_integrated(
+    customer_id: String,
+    payment_method_id: String,
+    user_id: String,
+    app: tauri::AppHandle,
+) -> Result<String, String> {
+    // Set as default in Stripe
+    set_default_payment_method(customer_id, payment_method_id.clone()).await?;
+    
+    // Update in database
+    crate::database::update_payment_method(
+        payment_method_id,
+        user_id,
+        Some(true), // is_default
+        None,       // is_active (don't change)
+        app,
+    ).await?;
+    
+    Ok("Payment method set as default successfully".to_string())
+}
+
+/// Delete payment method from both Stripe and database
+#[tauri::command]
+pub async fn delete_payment_method_integrated(
+    payment_method_id: String,
+    user_id: String,
+    app: tauri::AppHandle,
+) -> Result<String, String> {
+    // Delete from Stripe first
+    delete_payment_method(payment_method_id.clone()).await?;
+    
+    // Soft delete from database
+    crate::database::delete_payment_method_from_db(
+        payment_method_id,
+        user_id,
+        app,
+    ).await?;
+    
+    Ok("Payment method deleted successfully".to_string())
+}
+
+/// Create payment intent using stored payment method (for charging)
+#[tauri::command]
+pub async fn create_payment_intent_with_stored_method(
+    amount: i64,
+    currency: String,
+    payment_method_id: String,
+    user_id: String,
+    app: tauri::AppHandle,
+) -> Result<PaymentIntentResponse, String> {
+    let client = get_stripe_client()?;
+    
+    // Get customer ID from the stored payment method
+    let payment_methods = crate::database::get_user_payment_methods(user_id.clone(), app.clone()).await?;
+    let stored_pm = payment_methods
+        .iter()
+        .find(|pm| pm.stripe_payment_method_id == payment_method_id)
+        .ok_or_else(|| "Payment method not found in database".to_string())?;
+    
+    let currency = Currency::from_str(&currency.to_lowercase())
+        .map_err(|_| "Invalid currency code".to_string())?;
+    
+    let mut params = stripe::CreatePaymentIntent::new(amount, currency);
+    // Note: Customer ID would need to be retrieved from user profile if needed
+    // For now, we'll create the payment intent without explicit customer association
+    params.payment_method = Some(stripe::PaymentMethodId::from_str(&payment_method_id)
+        .map_err(|e| format!("Invalid payment method ID: {}", e))?);
+    params.confirmation_method = Some(stripe::PaymentIntentConfirmationMethod::Manual);
+    params.confirm = Some(true);
+    
+    let payment_intent = stripe::PaymentIntent::create(&client, params)
+        .await
+        .map_err(|e| format!("Failed to create payment intent: {}", e))?;
+    
+    // Mark payment method as used in database
+    let _ = crate::database::mark_payment_method_used(
+        payment_method_id,
+        user_id,
+        app,
+    ).await;
+    
+    Ok(PaymentIntentResponse {
+        client_secret: payment_intent.client_secret.unwrap_or_default(),
+        payment_intent_id: payment_intent.id.to_string(),
+    })
 }

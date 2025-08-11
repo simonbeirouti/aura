@@ -13,10 +13,10 @@
 
 <!-- Text Content -->
 <div class="text-center">
-    <h1 class="text-3xl font-bold text-base-content mb-6">
+    <h1 class="text-3xl font-bold text-foreground mb-6">
         Welcome to Aura!
     </h1>
-    <p class="text-lg text-base-content/80 leading-relaxed">
+    <p class="text-lg text-muted-foreground leading-relaxed">
         Your secure, personal digital vault where you can
         safely store and manage your most important
         information.

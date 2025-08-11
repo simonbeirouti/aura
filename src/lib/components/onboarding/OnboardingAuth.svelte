@@ -1,7 +1,7 @@
 <script lang="ts">
     import { createEventDispatcher, onMount, onDestroy } from "svelte";
     import { authStore } from "../../stores/supabaseAuth";
-    import { toast } from "../../stores/toast";
+    import { toast } from "svelte-sonner";
 
     const dispatch = createEventDispatcher();
 
@@ -286,14 +286,14 @@
             <!-- Toggle Buttons -->
             <div class="flex justify-center mb-4 sm:mb-6">
                 <div
-                    class="flex bg-base-300/80 rounded-xl p-1 w-3/4 sm:w-1/2 max-w-xs"
+                    class="flex bg-muted/80 rounded-xl p-1 w-3/4 sm:w-1/2 max-w-xs"
                 >
                     <button
                         onclick={() => (isSignUp = true)}
                         class="flex-1 py-2 sm:py-2.5 rounded-xl text-center font-semibold text-xs sm:text-sm transition-all"
                         class:bg-primary={isSignUp}
                         class:text-primary-content={isSignUp}
-                        class:text-base-content={!isSignUp}
+                        class:text-foreground={!isSignUp}
                     >
                         Sign Up
                     </button>
@@ -302,7 +302,7 @@
                         class="flex-1 py-2 sm:py-2.5 rounded-xl text-center font-semibold text-xs sm:text-sm transition-all"
                         class:bg-primary={!isSignUp}
                         class:text-primary-content={!isSignUp}
-                        class:text-base-content={isSignUp}
+                        class:text-foreground={isSignUp}
                     >
                         Log In
                     </button>
@@ -318,7 +318,7 @@
                             type="email"
                             bind:value={email}
                             placeholder="Email"
-                            class="input input-sm sm:input-md w-full bg-base-100/90 border-base-300 rounded-xl text-sm sm:text-base placeholder-base-content/60"
+                            class="flex h-10 w-full rounded-xl border border-input bg-background px-3 py-2 ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 text-sm sm:text-base"
                             disabled={loginLoading}
                             onfocus={handleInputFocus}
                             onblur={handleInputBlur}
@@ -331,7 +331,7 @@
                             type={showPassword ? "text" : "password"}
                             bind:value={password}
                             placeholder="Password"
-                            class="input input-sm sm:input-md w-full bg-base-100/90 border-base-300 rounded-xl text-sm sm:text-base placeholder-base-content/60 pr-10 sm:pr-12"
+                            class="flex h-10 w-full rounded-xl border border-input bg-background px-3 py-2 ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 text-sm sm:text-base pr-10 sm:pr-12"
                             disabled={loginLoading}
                             onfocus={handleInputFocus}
                             onblur={handleInputBlur}
@@ -339,7 +339,7 @@
                         <button
                             type="button"
                             onclick={togglePassword}
-                            class="absolute right-3 sm:right-4 top-1/2 -translate-y-1/2 text-base-content/60 hover:text-base-content"
+                            class="absolute right-3 sm:right-4 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                         >
                             {#if showPassword}
                                 <svg
@@ -383,7 +383,7 @@
                     <button
                         onclick={handleEmailAuth}
                         disabled={loginLoading || !isFormValid}
-                        class="btn btn-primary btn-sm sm:btn-md w-full rounded-xl py-3 sm:py-4 text-sm sm:text-base font-semibold disabled:btn-disabled"
+                        class="inline-flex items-center justify-center rounded-xl ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-primary text-primary-foreground hover:bg-primary/90 w-full py-3 sm:py-4 text-sm sm:text-base font-semibold"
                     >
                         {#if loginLoading}
                             <span
@@ -401,7 +401,7 @@
 
     <!-- OR ACCESS WITH - Outside the card -->
     <div class="text-center mt-4 sm:mt-6 mb-4 sm:mb-6">
-        <p class="text-base-content/60 text-xs font-medium tracking-wide">
+        <p class="text-muted-foreground text-xs font-medium tracking-wide">
             OR ACCESS WITH
         </p>
     </div>
@@ -410,7 +410,7 @@
     <div class="flex justify-center gap-4 sm:gap-5 mb-4 sm:mb-6 pb-safe">
         <button
             onclick={handleAppleSignIn}
-            class="btn btn-circle bg-base-100 border-base-300 hover:bg-base-200 w-12 h-12 sm:w-14 sm:h-14 shadow-sm"
+            class="inline-flex items-center justify-center rounded-full border border-input bg-background hover:bg-accent hover:text-accent-foreground w-12 h-12 sm:w-14 sm:h-14 shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
             aria-label="Sign in with Apple"
         >
             <svg
@@ -426,7 +426,7 @@
 
         <button
             onclick={handleFacebookSignIn}
-            class="btn btn-circle bg-base-100 border-base-300 hover:bg-base-200 w-12 h-12 sm:w-14 sm:h-14 shadow-sm"
+            class="inline-flex items-center justify-center rounded-full border border-input bg-background hover:bg-accent hover:text-accent-foreground w-12 h-12 sm:w-14 sm:h-14 shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
             aria-label="Sign in with Facebook"
         >
             <svg
@@ -442,7 +442,7 @@
 
         <button
             onclick={handleGoogleSignIn}
-            class="btn btn-circle bg-base-100 border-base-300 hover:bg-base-200 w-12 h-12 sm:w-14 sm:h-14 shadow-sm"
+            class="inline-flex items-center justify-center rounded-full border border-input bg-background hover:bg-accent hover:text-accent-foreground w-12 h-12 sm:w-14 sm:h-14 shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
             aria-label="Sign in with Google"
         >
             <svg class="w-5 h-5 sm:w-6 sm:h-6" viewBox="0 0 24 24">

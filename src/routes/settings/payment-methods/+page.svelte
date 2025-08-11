@@ -2,73 +2,580 @@
   import { onMount } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
   import { goto } from '$app/navigation';
-  import PaymentMethodManager from '$lib/components/PaymentMethodManager.svelte';
   import { authStore } from '$lib/stores/supabaseAuth';
-  import { ArrowLeft } from 'lucide-svelte';
+  import { ArrowLeft, CreditCard, Plus, Trash2, MoreHorizontal } from 'lucide-svelte';
+  import AppLayout from '$lib/components/AppLayout.svelte';
+  import { Card, CardContent, CardHeader, CardTitle } from '$lib/components/ui/card';
+  import { Button } from '$lib/components/ui/button';
+  import { Badge } from '$lib/components/ui/badge';
+  import { Input } from '$lib/components/ui/input';
+  import { Label } from '$lib/components/ui/label';
+  import {
+    Drawer,
+    DrawerContent,
+    DrawerDescription,
+    DrawerFooter,
+    DrawerHeader,
+    DrawerTitle,
+    DrawerTrigger,
+    DrawerClose
+  } from '$lib/components/ui/drawer';
+  import { loadStripe, type Stripe, type StripeElements } from '@stripe/stripe-js';
   
+  interface PaymentMethod {
+    id: string;
+    user_id: string;
+    stripe_payment_method_id: string;
+    card_brand: string;
+    card_last4: string;
+    card_exp_month: number;
+    card_exp_year: number;
+    is_default: boolean;
+    is_active: boolean;
+    created_at?: string;
+    updated_at?: string;
+    last_used_at?: string;
+  }
+
+  interface SetupIntentResponse {
+    client_secret: string;
+    setup_intent_id: string;
+  }
+
   let customerId = '';
+  let userId = '';
   let loading = true;
   let error = '';
+  let loadError = '';
+  let paymentMethods: PaymentMethod[] = [];
+  let isDrawerOpen = false;
+  let isEditDrawerOpen = false;
+  let selectedPaymentMethod: PaymentMethod | null = null;
+  let isProcessing = false;
+  
+  // Stripe Elements
+  let stripe: Stripe | null = null;
+  let elements: StripeElements | null = null;
+  let cardNumberElement: any = null;
+  let cardExpiryElement: any = null;
+  let cardCvcElement: any = null;
+  let setupIntent: SetupIntentResponse | null = null;
+  
+  // Form containers
+  let cardContainer: HTMLElement;
+  let expiryContainer: HTMLElement;
+  let cvcContainer: HTMLElement;
 
   onMount(async () => {
+    console.log('Payment methods page: Starting initialization...');
+    
     try {
-      // Get current user information
-      const { data: { user }, error: userError } = await authStore.getCurrentUser();
+      // Get current user information using the same approach as settings page
+      console.log('Payment methods page: Getting current user from authStore...');
+      console.log('Payment methods page: $authStore.user:', $authStore.user);
       
-      if (userError || !user) {
+      if (!$authStore.user) {
+        console.error('Payment methods page: User not found in authStore');
         throw new Error('User not authenticated');
       }
 
+      // Store user ID for database operations
+      userId = $authStore.user.id;
+      console.log('Payment methods page: User ID from authStore:', userId);
+
+      console.log('Payment methods page: User authenticated, getting customer...');
       // Get or create customer with user information
       const customer = await invoke<{id: string}>('get_or_create_customer', {
-        email: user.email || '',
-        name: user.user_metadata?.full_name || user.email || 'Unknown User'
+        email: $authStore.user.email || '',
+        name: $authStore.user.user_metadata?.full_name || $authStore.user.email || 'Unknown User'
       });
       customerId = customer.id;
+      console.log('Payment methods page: Customer ID:', customerId);
+      
+      console.log('Payment methods page: Loading payment methods...');
+      await loadPaymentMethods();
+      
+      console.log('Payment methods page: Initializing Stripe...');
+      await initializeStripe();
+      
+      console.log('Payment methods page: Initialization complete');
     } catch (err) {
-      console.error('Failed to get customer:', err);
-      error = 'Failed to load payment methods';
+      console.error('Payment methods page: Initialization failed:', err);
+      loadError = `Failed to initialize payment system: ${err instanceof Error ? err.message : String(err)}`;
     } finally {
+      console.log('Payment methods page: Setting loading to false');
       loading = false;
     }
   });
+
+  async function loadPaymentMethods() {
+    if (!userId) {
+      console.error('Cannot load payment methods: User ID not available');
+      return;
+    }
+    
+    try {
+      console.log('Loading payment methods for user:', userId);
+      // Use the new database-backed function that's scoped to the user
+      paymentMethods = await invoke<PaymentMethod[]>('get_stored_payment_methods', {
+        userId
+      });
+      console.log('Loaded payment methods:', paymentMethods.length);
+      loadError = ''; // Clear any previous load errors
+    } catch (err) {
+      console.error('Failed to load payment methods:', err);
+      loadError = 'Failed to load payment methods';
+      // Fallback to Stripe API if database fails
+      if (customerId) {
+        try {
+          console.log('Falling back to Stripe API...');
+          paymentMethods = await invoke<PaymentMethod[]>('list_payment_methods', {
+            customerId
+          });
+          console.log('Fallback successful, loaded from Stripe:', paymentMethods.length);
+          loadError = ''; // Clear error if fallback works
+        } catch (fallbackErr) {
+          console.error('Fallback to Stripe also failed:', fallbackErr);
+          loadError = 'Failed to load payment methods from both database and Stripe';
+        }
+      }
+    }
+  }
+
+  async function initializeStripe() {
+    try {
+      const publishableKey = await invoke<string>('get_stripe_publishable_key');
+      stripe = await loadStripe(publishableKey);
+    } catch (err) {
+      console.error('Failed to initialize Stripe:', err);
+      error = 'Failed to initialize payment system';
+    }
+  }
+
+  async function createSetupIntent() {
+    if (!customerId) return;
+    
+    try {
+      setupIntent = await invoke<SetupIntentResponse>('create_setup_intent', {
+        customerId
+      });
+      
+      // Initialize Stripe Elements
+      if (stripe && setupIntent) {
+        elements = stripe.elements({
+          clientSecret: setupIntent.client_secret
+        });
+        
+        // Create card elements with explicit placeholders
+        const elementStyle = {
+          base: {
+            fontSize: '16px',
+            color: 'hsl(var(--foreground))',
+            lineHeight: '1.5',
+            '::placeholder': {
+              color: 'hsl(var(--muted-foreground))',
+            },
+          },
+        };
+        
+        cardNumberElement = elements.create('cardNumber', { 
+          style: elementStyle,
+          placeholder: '1234 1234 1234 1234'
+        });
+        cardExpiryElement = elements.create('cardExpiry', { 
+          style: elementStyle,
+          placeholder: 'MM / YY'
+        });
+        cardCvcElement = elements.create('cardCvc', { 
+          style: elementStyle,
+          placeholder: 'CVC'
+        });
+        
+        // Mount elements immediately when containers are available
+        const mountElements = () => {
+          if (cardContainer && expiryContainer && cvcContainer) {
+            cardNumberElement.mount(cardContainer);
+            cardExpiryElement.mount(expiryContainer);
+            cardCvcElement.mount(cvcContainer);
+            return true;
+          }
+          return false;
+        };
+        
+        // Try to mount immediately, if containers aren't ready, wait briefly
+        if (!mountElements()) {
+          setTimeout(mountElements, 50);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to create setup intent:', err);
+      error = 'Failed to initialize payment form';
+    }
+  }
+
+  async function handleAddPaymentMethod() {
+    if (!stripe || !elements || !setupIntent || !cardNumberElement) {
+      return;
+    }
+    isProcessing = true;
+    error = '';
+    
+    try {
+      // First, create the payment method using the card element
+      console.log('[DEBUG] Creating payment method with Stripe...');
+      const { error: paymentMethodError, paymentMethod } = await stripe.createPaymentMethod({
+        type: 'card',
+        card: cardNumberElement,
+      });
+      
+      console.log('[DEBUG] Stripe createPaymentMethod result:', { paymentMethodError, paymentMethod });
+      
+      if (paymentMethodError) {
+        throw new Error(paymentMethodError.message);
+      }
+      
+      // Then confirm the setup intent with the payment method
+      const { error: confirmError } = await stripe.confirmSetup({
+        clientSecret: setupIntent.client_secret,
+        confirmParams: {
+          payment_method: paymentMethod.id,
+        },
+        redirect: 'if_required',
+      });
+      
+      if (confirmError) {
+        throw new Error(confirmError.message);
+      }
+      
+      // Store payment method in database with user association
+      try {
+        const storedPaymentMethod = await invoke('store_payment_method_after_setup', {
+          customerId,
+          paymentMethodId: paymentMethod.id,
+          userId,
+          isDefault: paymentMethods.length === 0
+        });
+      } catch (dbError: any) {
+        error = `Payment method added to Stripe but failed to save to database: ${dbError?.message || String(dbError)}`;
+        // Don't re-throw, continue with loading payment methods
+      }
+      
+      // Reload payment methods from database
+      await loadPaymentMethods();
+      
+      // Close drawer and reset form
+      isDrawerOpen = false;
+      setupIntent = null;
+      
+      // Clear the form elements
+      if (cardNumberElement && cardExpiryElement && cardCvcElement) {
+        cardNumberElement.clear();
+        cardExpiryElement.clear();
+        cardCvcElement.clear();
+      }
+      
+    } catch (err: any) {
+      error = err.message || 'Failed to add payment method';
+    } finally {
+      isProcessing = false;
+    }
+  }
+
+  async function deletePaymentMethod(paymentMethodId: string) {
+    if (!userId) {
+      console.error('Cannot delete payment method: User ID not available');
+      error = 'User authentication required';
+      return;
+    }
+    
+    try {
+      console.log('Deleting payment method for user:', userId, 'payment method:', paymentMethodId);
+      // Use the integrated function that removes from both Stripe and database
+      await invoke('delete_payment_method_integrated', {
+        paymentMethodId,
+        userId
+      });
+      
+      console.log('Payment method deleted successfully');
+      // Reload payment methods from database
+      await loadPaymentMethods();
+    } catch (err) {
+      console.error('Failed to delete payment method:', err);
+      error = 'Failed to delete payment method';
+    }
+  }
+
+  async function setDefaultPaymentMethod(paymentMethodId: string) {
+    if (!userId || !customerId) {
+      console.error('Cannot set default payment method: User ID or Customer ID not available');
+      error = 'User authentication required';
+      return;
+    }
+    
+    try {
+      console.log('Setting default payment method for user:', userId, 'payment method:', paymentMethodId);
+      // Use the integrated function that updates both Stripe and database
+      await invoke('set_default_payment_method_integrated', {
+        customerId,
+        paymentMethodId,
+        userId
+      });
+      
+      console.log('Default payment method set successfully');
+      // Reload payment methods from database
+      await loadPaymentMethods();
+    } catch (err) {
+      console.error('Failed to set default payment method:', err);
+      error = 'Failed to set default payment method';
+    }
+  }
+
+  function getBrandIcon(brand: string) {
+    switch (brand.toLowerCase()) {
+      case 'visa':
+        return '💳';
+      case 'mastercard':
+        return '💳';
+      case 'amex':
+        return '💳';
+      default:
+        return '💳';
+    }
+  }
+
+  async function openDrawer() {
+    // Pre-initialize Stripe Elements before opening drawer to prevent layout shift
+    if (!setupIntent) {
+      await createSetupIntent();
+    } else {
+      // If elements already exist, remount them to ensure they're visible
+      await remountStripeElements();
+    }
+    isDrawerOpen = true;
+  }
+  
+  function openEditDrawer(method: PaymentMethod) {
+    selectedPaymentMethod = method;
+    isEditDrawerOpen = true;
+  }
+  
+  async function remountStripeElements() {
+    if (cardNumberElement && cardExpiryElement && cardCvcElement) {
+      // Wait a brief moment for containers to be available in DOM
+      await new Promise(resolve => setTimeout(resolve, 10));
+      
+      const mountElements = () => {
+        if (cardContainer && expiryContainer && cvcContainer) {
+          try {
+            // Unmount first to avoid errors, then remount
+            cardNumberElement.unmount();
+            cardExpiryElement.unmount();
+            cardCvcElement.unmount();
+            
+            cardNumberElement.mount(cardContainer);
+            cardExpiryElement.mount(expiryContainer);
+            cardCvcElement.mount(cvcContainer);
+            return true;
+          } catch (err) {
+            console.log('Remounting elements (expected on first mount):', err);
+            // Try mounting without unmounting (for first time)
+            cardNumberElement.mount(cardContainer);
+            cardExpiryElement.mount(expiryContainer);
+            cardCvcElement.mount(cvcContainer);
+            return true;
+          }
+        }
+        return false;
+      };
+      
+      // Try to mount immediately, if containers aren't ready, wait briefly
+      if (!mountElements()) {
+        setTimeout(mountElements, 50);
+      }
+    }
+  }
 
   function goBack() {
     goto('/settings');
   }
 </script>
 
-<div class="min-h-screen bg-base-100">
-  <!-- Header -->
-  <div class="bg-white border-b border-base-200">
-    <div class="max-w-4xl mx-auto px-4 py-4">
-      <div class="flex items-center gap-4">
-        <button 
-          onclick={goBack}
-          class="p-2 hover:bg-base-200 rounded-full transition-colors"
-          aria-label="Go back to settings"
-        >
-          <ArrowLeft class="w-6 h-6" />
-        </button>
-        <div>
-          <h1 class="text-2xl font-bold text-base-content">Payment methods</h1>
+<AppLayout title="Payment Methods" showBackButton={true} onBack={goBack} maxWidth="max-w-4xl">
+  {#if loading}
+    <div class="flex justify-center py-12">
+      <div class="w-8 h-8 border-4 border-primary/20 border-t-primary rounded-full animate-spin"></div>
+    </div>
+  {:else}
+    <div class="space-y-6">
+      <!-- Load Error Display -->
+      {#if loadError}
+        <Card class="border-destructive bg-destructive/5">
+          <CardContent class="p-4">
+            <p class="text-destructive">{loadError}</p>
+          </CardContent>
+        </Card>
+      {/if}
+      
+      <!-- Drawer for adding payment methods -->
+      <Drawer bind:open={isDrawerOpen}>
+        <DrawerContent>
+          <DrawerHeader>
+            <DrawerTitle>Add Payment Method</DrawerTitle>
+            <DrawerDescription>
+              Add a new payment method to your account
+            </DrawerDescription>
+          </DrawerHeader>
+          
+          <div class="px-4 space-y-4">
+            {#if error}
+              <div class="p-3 bg-destructive/10 border border-destructive/20 rounded-lg">
+                <p class="text-destructive text-sm">{error}</p>
+              </div>
+            {/if}
+            
+            <div class="space-y-4">
+              <div class="space-y-2">
+                <Label for="card-number">Card Number</Label>
+                <div id="card-number" class="p-3 border border-border rounded-lg" bind:this={cardContainer}></div>
+              </div>
+              
+              <div class="grid grid-cols-2 gap-4">
+                <div class="space-y-2">
+                  <Label for="card-expiry">Expiry Date</Label>
+                  <div id="card-expiry" class="p-3 border border-border rounded-lg" bind:this={expiryContainer}></div>
+                </div>
+                <div class="space-y-2">
+                  <Label for="card-cvc">CVC</Label>
+                  <div id="card-cvc" class="p-3 border border-border rounded-lg" bind:this={cvcContainer}></div>
+                </div>
+              </div>
+            </div>
+          </div>
+          
+          <DrawerFooter>
+            <Button 
+              type="button" 
+              onclick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                handleAddPaymentMethod();
+              }} 
+              disabled={isProcessing || !setupIntent} 
+              class="w-full"
+            >
+              {#if isProcessing}
+                <div class="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin mr-2"></div>
+                Adding...
+              {:else}
+                Add Payment Method
+              {/if}
+            </Button>
+            <DrawerClose>
+              <Button variant="outline" class="w-full">Cancel</Button>
+            </DrawerClose>
+          </DrawerFooter>
+        </DrawerContent>
+      </Drawer>
+      
+      <!-- Edit Payment Method Drawer -->
+      <Drawer bind:open={isEditDrawerOpen}>
+        <DrawerContent>
+          <DrawerHeader>
+            <DrawerTitle class="flex items-center justify-center text-center">
+              Edit 
+              {#if selectedPaymentMethod}
+                {selectedPaymentMethod.card_brand.toUpperCase()} •••• {selectedPaymentMethod.card_last4}
+              {/if}
+            </DrawerTitle>
+          </DrawerHeader>
+          
+          <div class="px-4 space-y-3">
+            {#if selectedPaymentMethod && !selectedPaymentMethod.is_default}
+              <Button 
+                onclick={() => {
+                  if (selectedPaymentMethod) {
+                    setDefaultPaymentMethod(selectedPaymentMethod.stripe_payment_method_id);
+                    isEditDrawerOpen = false;
+                  }
+                }}
+                class="w-full justify-start"
+                variant="ghost"
+              >
+                Set Default
+              </Button>
+            {/if}
+            
+            <Button 
+              onclick={() => {
+                if (selectedPaymentMethod) {
+                  deletePaymentMethod(selectedPaymentMethod.stripe_payment_method_id);
+                  isEditDrawerOpen = false;
+                }
+              }}
+              class="w-full justify-start text-destructive hover:text-destructive hover:bg-destructive/10"
+              variant="ghost"
+            >
+              Remove
+            </Button>
+          </div>
+          
+          <DrawerFooter>
+            <DrawerClose>
+              <Button variant="outline" class="w-full">Cancel</Button>
+            </DrawerClose>
+          </DrawerFooter>
+        </DrawerContent>
+      </Drawer>
+
+      
+      <!-- Payment Methods List -->
+      {#if paymentMethods.length === 0}
+        <div class="py-12 text-center">
+          <CreditCard class="w-12 h-12 text-muted-foreground mx-auto mb-4" />
+          <h3 class="text-lg font-medium mb-2">No payment methods</h3>
+          <p class="text-muted-foreground mb-4">Add your first payment method to get started</p>
         </div>
+      {:else}
+        <div class="space-y-0">
+          {#each paymentMethods as method, index (method.id)}
+            <div class="flex items-center justify-between px-2 py-4 {index < paymentMethods.length - 1 ? 'border-b border-border' : ''}">
+              <div class="flex items-center gap-3">
+                <div class="text-2xl">{getBrandIcon(method.card_brand)}</div>
+                <div>
+                  <div class="flex items-center gap-2">
+                    <span class="font-medium text-sm">
+                      {method.card_brand.toUpperCase()} •••• {method.card_last4}
+                    </span>
+                    {#if method.is_default}
+                      <Badge variant="default" class="text-xs">Default</Badge>
+                    {/if}
+                  </div>
+                  <p class="text-xs text-muted-foreground">
+                    Expires {method.card_exp_month.toString().padStart(2, '0')}/{method.card_exp_year}
+                  </p>
+                </div>
+              </div>
+              
+              <Button
+                variant="outline"
+                size="sm"
+                onclick={() => openEditDrawer(method)}
+                class="text-muted-foreground hover:text-foreground"
+              >
+                Edit
+              </Button>
+            </div>
+          {/each}
+        </div>
+      {/if}
+      
+      <!-- Single Add Payment Method Button -->
+      <div class="flex justify-center">
+        <Button onclick={openDrawer} class="gap-2">
+          <Plus class="w-4 h-4" />
+          Add Payment Method
+        </Button>
       </div>
     </div>
-  </div>
-
-  <!-- Content -->
-  <div class="max-w-4xl mx-auto px-4 py-8">
-    {#if loading}
-      <div class="flex justify-center py-12">
-        <span class="loading loading-spinner w-8 h-8"></span>
-      </div>
-    {:else if error}
-      <div class="alert alert-error">
-        <span>{error}</span>
-      </div>
-    {:else}
-      <PaymentMethodManager {customerId} />
-    {/if}
-  </div>
-</div>
+  {/if}
+</AppLayout>

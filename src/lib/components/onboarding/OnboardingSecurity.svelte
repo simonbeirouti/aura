@@ -13,10 +13,10 @@
 
 <!-- Text Content -->
 <div class="text-center">
-    <h2 class="text-3xl font-bold text-base-content mb-6">
+    <h2 class="text-3xl font-bold text-foreground mb-6">
         Secure & Private
     </h2>
-    <p class="text-lg text-base-content/80 leading-relaxed">
+    <p class="text-lg text-muted-foreground leading-relaxed">
         Your data is encrypted and stored securely. Only you
         have access to your information.
     </p>

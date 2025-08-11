@@ -1,9 +1,11 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import "../app.css";
-  import Toast from "../lib/components/Toast.svelte";
+  import { ModeWatcher } from "mode-watcher";
+  import { Toaster } from "../lib/components/ui/sonner";
   import GlobalLoading from "../lib/components/GlobalLoading.svelte";
   import Onboarding from "../lib/components/Onboarding.svelte";
+  import FooterNavigation from "../lib/components/FooterNavigation.svelte";
   import { authStore } from "../lib/stores/supabaseAuth";
   import { dataActions } from "../lib/stores/dataStore";
   import { loadingActions } from "../lib/stores/loadingStore";
@@ -83,20 +85,33 @@
 
 </script>
 
-{#if shouldShowMainApp}
-  <slot />
-{:else if shouldShowOnboarding}
-  <Onboarding on:complete={handleOnboardingComplete} />
-{:else}
-  <!-- Fallback state - shouldn't normally reach here -->
-  <div class="min-h-screen bg-base-200 flex items-center justify-center">
-    <div class="text-center">
-      <p class="text-lg text-base-content">
-        Something went wrong. Please refresh the page.
-      </p>
+<!-- Strict fixed viewport - NEVER scrolls -->
+<div class="fixed inset-0 flex flex-col" style="height: 100vh; max-height: 100vh; overflow: hidden;">
+  {#if shouldShowMainApp}
+    <!-- Content area - exactly 100vh minus footer height -->
+    <div class="flex-1" style="height: calc(100vh - 4rem); max-height: calc(100vh - 4rem); overflow: hidden;">
+      <slot />
     </div>
-  </div>
-{/if}
+    <!-- Footer - fixed 4rem height -->
+    <div style="height: 4rem; min-height: 4rem; max-height: 4rem; flex-shrink: 0;">
+      <FooterNavigation />
+    </div>
+  {:else if shouldShowOnboarding}
+    <div class="h-full overflow-hidden">
+      <Onboarding on:complete={handleOnboardingComplete} />
+    </div>
+  {:else}
+    <!-- Fallback state -->
+    <div class="h-full bg-background flex items-center justify-center overflow-hidden">
+      <div class="text-center">
+        <p class="text-lg text-foreground">
+          Something went wrong. Please refresh the page.
+        </p>
+      </div>
+    </div>
+  {/if}
+</div>
 
-<Toast />
+<ModeWatcher />
+<Toaster position="top-center" />
 <GlobalLoading />

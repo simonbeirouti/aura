@@ -7,6 +7,10 @@
   import { dataActions, dataStore } from "../lib/stores/dataStore";
   import { loadingActions } from "../lib/stores/loadingStore";
 
+  import { goto } from "$app/navigation";
+  import { Card, CardContent, CardHeader, CardTitle } from "$lib/components/ui/card";
+  import { Button } from "$lib/components/ui/button";
+
   let needsOnboarding = false;
   let profileChecked = false;
 
@@ -89,39 +93,52 @@
   <OnboardingProfile on:complete={handleProfileComplete} />
 {:else}
   <!-- Normal Home Page -->
-  <AppLayout>
-    <div class="hero bg-base-100 rounded-2xl shadow-xl w-full max-w-md">
-      <div class="hero-content text-center py-8 px-6">
-        <div class="max-w-md">
-          <h1 class="text-4xl md:text-5xl font-bold text-primary mb-6">
-            Hello there! 👋
-          </h1>
-          <p class="text-lg text-base-content/80 mb-8">
-            Welcome to Aura! You're successfully authenticated and ready to
-            explore.
-          </p>
+  <AppLayout maxWidth="max-w-2xl">
+    <div slot="header-actions">
 
-          {#if $authStore.user}
-            <div class="bg-base-200 rounded-lg p-4 mb-6">
-              <p class="text-sm text-base-content/60 mb-1">Signed in as</p>
-              <p class="font-medium text-base-content">
-                {$authStore.user.email}
-              </p>
-            </div>
-          {/if}
-
-          <div class="space-y-4">
-            <a href="/features" class="btn btn-primary btn-lg w-full">
-              <PlayIcon class="w-5 h-5 mr-2" />
-              Explore Features
-            </a>
-            <a href="/settings" class="btn btn-outline btn-lg w-full">
-              <CogIcon class="w-5 h-5 mr-2" />
-              Settings
-            </a>
-          </div>
-        </div>
-      </div>
     </div>
+    
+    <Card class="text-center">
+      <CardHeader>
+        <CardTitle class="text-4xl md:text-5xl font-bold text-primary mb-4">
+          Hello there! 👋
+        </CardTitle>
+        <p class="text-lg text-muted-foreground">
+          Welcome to Aura! You're successfully authenticated and ready to
+          explore.
+        </p>
+      </CardHeader>
+      <CardContent>
+        {#if $authStore.user}
+          <div class="bg-muted rounded-lg p-4 mb-6">
+            <p class="text-sm text-muted-foreground mb-1">Signed in as</p>
+            <p class="font-medium text-foreground">
+              {$authStore.user.email}
+            </p>
+          </div>
+        {/if}
+
+        <div class="space-y-4">
+          <Button
+            onclick={() => goto('/features')}
+            variant="default"
+            size="lg"
+            class="w-full gap-2"
+          >
+            <PlayIcon class="w-5 h-5" />
+            Explore Features
+          </Button>
+          <Button
+            onclick={() => goto('/settings')}
+            variant="outline"
+            size="lg"
+            class="w-full gap-2"
+          >
+            <CogIcon class="w-5 h-5" />
+            Settings
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
   </AppLayout>
 {/if}
