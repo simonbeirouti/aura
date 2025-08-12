@@ -6,6 +6,8 @@ mod database;
 mod enhanced_store;
 // Stripe payment processing module
 mod stripe;
+// Migration management module
+mod migrations;
 
 // Import required for environment variable loading
 use dotenv;
@@ -65,7 +67,25 @@ fn validate_stripe_environment() {
     let mut missing_vars = Vec::new();
     
     for var in &required_vars {
-        if std::env::var(var).is_err() {
+        // Check both runtime and compile-time environment variables
+        let runtime_var = std::env::var(var).ok();
+        let compile_time_var = match *var {
+            "STRIPE_SECRET_KEY" => {
+                let val = env!("STRIPE_SECRET_KEY");
+                if val.is_empty() { None } else { Some(val.to_string()) }
+            },
+            "STRIPE_PUBLISHABLE_KEY" => {
+                let val = env!("STRIPE_PUBLISHABLE_KEY");
+                if val.is_empty() { None } else { Some(val.to_string()) }
+            },
+            "VITE_STRIPE_PRODUCT_ID" => {
+                let val = env!("STRIPE_PRODUCT_ID");
+                if val.is_empty() { None } else { Some(val.to_string()) }
+            },
+            _ => None,
+        };
+        
+        if runtime_var.is_none() && compile_time_var.is_none() {
             missing_vars.push(*var);
         }
     }
@@ -73,6 +93,12 @@ fn validate_stripe_environment() {
     if !missing_vars.is_empty() {
         #[cfg(debug_assertions)]
         eprintln!("WARNING: Missing required environment variables: {:?}", missing_vars);
+        
+        // On mobile platforms, this is less critical as Stripe might be optional for some features
+        #[cfg(target_os = "ios")]
+        {
+            eprintln!("Note: On iOS, some Stripe features may be limited without environment variables");
+        }
         
         #[cfg(not(debug_assertions))]
         eprintln!("WARNING: Some Stripe configuration is missing. Check environment variables.");
@@ -109,6 +135,10 @@ pub fn run() {
             database::check_username_availability,
             database::get_database_status,
             database::update_subscription_status,
+            // Migration management commands
+            migrations::get_migration_status,
+            migrations::run_migrations,
+            migrations::reset_migration_state,
             // Payment method database commands
             database::store_payment_method,
             database::get_user_payment_methods,

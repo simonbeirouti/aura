@@ -55,14 +55,8 @@ pub struct ProductWithPrices {
 
 // Initialize Stripe client with secret key from environment or manual input
 fn get_stripe_client() -> Result<Client, String> {
-    // Try compile-time environment variable first (for mobile platforms)
-    let secret_key = if !env!("STRIPE_SECRET_KEY").is_empty() {
-        env!("STRIPE_SECRET_KEY").to_string()
-    } else {
-        // Fallback to runtime environment variable (for desktop)
-        std::env::var("STRIPE_SECRET_KEY")
-            .map_err(|_| "STRIPE_SECRET_KEY environment variable not set".to_string())?
-    };
+    // Try multiple sources for environment variables to ensure mobile compatibility
+    let secret_key = get_env_var("STRIPE_SECRET_KEY")?;
     
     if secret_key.is_empty() {
         return Err("STRIPE_SECRET_KEY is empty".to_string());
@@ -71,29 +65,56 @@ fn get_stripe_client() -> Result<Client, String> {
     Ok(Client::new(secret_key))
 }
 
+// Helper function to get environment variables from multiple sources
+fn get_env_var(var_name: &str) -> Result<String, String> {
+    // First try runtime environment variable (works on desktop)
+    if let Ok(value) = std::env::var(var_name) {
+        if !value.is_empty() {
+            return Ok(value);
+        }
+    }
+    
+    // Then try compile-time environment variable (works on mobile)
+    let compile_time_value = match var_name {
+        "STRIPE_SECRET_KEY" => env!("STRIPE_SECRET_KEY"),
+        "STRIPE_PUBLISHABLE_KEY" => env!("STRIPE_PUBLISHABLE_KEY"),
+        "STRIPE_PRODUCT_ID" => env!("STRIPE_PRODUCT_ID"),
+        _ => "",
+    };
+    
+    if !compile_time_value.is_empty() {
+        return Ok(compile_time_value.to_string());
+    }
+    
+    // On mobile platforms, provide more helpful error messages
+    #[cfg(target_os = "ios")]
+    {
+        return Err(format!(
+            "{} not found. On iOS, environment variables must be set at build time. \
+            Please check your .env file and rebuild the app.",
+            var_name
+        ));
+    }
+    
+    #[cfg(target_os = "android")]
+    {
+        return Err(format!(
+            "{} not found. On Android, environment variables must be set at build time. \
+            Please check your .env file and rebuild the app.",
+            var_name
+        ));
+    }
+    
+    // Default error for other platforms
+    Err(format!("{} environment variable not set", var_name))
+}
+
 // Get Stripe configuration from environment variables with cross-platform support
+#[allow(dead_code)]
 fn get_stripe_config() -> Result<StripeConfig, String> {
-    // Try compile-time environment variables first (for mobile platforms)
-    let secret_key = if !env!("STRIPE_SECRET_KEY").is_empty() {
-        env!("STRIPE_SECRET_KEY").to_string()
-    } else {
-        std::env::var("STRIPE_SECRET_KEY")
-            .map_err(|_| "STRIPE_SECRET_KEY environment variable not set".to_string())?
-    };
-    
-    let publishable_key = if !env!("STRIPE_PUBLISHABLE_KEY").is_empty() {
-        env!("STRIPE_PUBLISHABLE_KEY").to_string()
-    } else {
-        std::env::var("STRIPE_PUBLISHABLE_KEY")
-            .map_err(|_| "STRIPE_PUBLISHABLE_KEY environment variable not set".to_string())?
-    };
-    
-    let price_id = if !env!("STRIPE_PRODUCT_ID").is_empty() {
-        env!("STRIPE_PRODUCT_ID").to_string()
-    } else {
-        std::env::var("STRIPE_PRODUCT_ID")
-            .map_err(|_| "STRIPE_PRODUCT_ID environment variable not set".to_string())?
-    };
+    let secret_key = get_env_var("STRIPE_SECRET_KEY")?;
+    let publishable_key = get_env_var("STRIPE_PUBLISHABLE_KEY")?;
+    let price_id = get_env_var("STRIPE_PRODUCT_ID")?;
 
     Ok(StripeConfig {
         secret_key,
@@ -104,15 +125,7 @@ fn get_stripe_config() -> Result<StripeConfig, String> {
 
 // Get only publishable key for payment method operations (doesn't require product ID)
 fn get_stripe_publishable_key_only() -> Result<String, String> {
-    // Try compile-time environment variables first (for mobile platforms)
-    let publishable_key = if !env!("STRIPE_PUBLISHABLE_KEY").is_empty() {
-        env!("STRIPE_PUBLISHABLE_KEY").to_string()
-    } else {
-        std::env::var("STRIPE_PUBLISHABLE_KEY")
-            .map_err(|_| "STRIPE_PUBLISHABLE_KEY environment variable not set".to_string())?
-    };
-    
-    Ok(publishable_key)
+    get_env_var("STRIPE_PUBLISHABLE_KEY")
 }
 
 #[tauri::command]
@@ -1109,7 +1122,7 @@ pub async fn create_payment_intent_with_stored_method(
     
     // Get customer ID from the stored payment method
     let payment_methods = crate::database::get_user_payment_methods(user_id.clone(), app.clone()).await?;
-    let stored_pm = payment_methods
+    let _stored_pm = payment_methods
         .iter()
         .find(|pm| pm.stripe_payment_method_id == payment_method_id)
         .ok_or_else(|| "Payment method not found in database".to_string())?;

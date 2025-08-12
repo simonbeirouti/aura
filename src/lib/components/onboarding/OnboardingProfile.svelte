@@ -1,6 +1,6 @@
 <script lang="ts">
     import { createEventDispatcher } from "svelte";
-    import { authStore } from "../../stores/supabaseAuth";
+    import { centralizedAuth } from "../../stores/unifiedAuth";
     import { dataStore } from "../../stores/dataStore";
     import {
         uploadAvatar,
@@ -32,15 +32,15 @@
     let fileInput: HTMLInputElement;
 
     // Initialize with user data if available
-    $: if ($authStore.user && !profileData.full_name) {
-        profileData.full_name = $authStore.user.user_metadata?.full_name || "";
+    $: if ($centralizedAuth.user && !profileData.full_name) {
+        profileData.full_name = $centralizedAuth.user.user_metadata?.full_name || "";
     }
 
     async function handleAvatarUpload(event: Event) {
         const input = event.target as HTMLInputElement;
         const file = input.files?.[0];
 
-        if (!file || !$authStore.user) return;
+        if (!file || !$centralizedAuth.user) return;
 
         try {
             // Validate file
@@ -53,7 +53,7 @@
             isUploading = true;
             uploadError = "";
 
-            const result = await uploadAvatar(file, $authStore.user.id);
+            const result = await uploadAvatar(file, $centralizedAuth.user.id);
             if (result.success && result.publicUrl) {
                 profileData.avatar_url = result.publicUrl;
                 avatarPreview = result.publicUrl;
@@ -121,7 +121,7 @@
     }
 
     async function completeOnboarding(isSkipped = false) {
-        if (!$authStore.user) {
+        if (!$centralizedAuth.user) {
             console.error("No authenticated user found");
             return;
         }
@@ -131,7 +131,7 @@
         try {
             // Create or update user profile
             const profilePayload = {
-                full_name: profileData.full_name || $authStore.user.email || "",
+                full_name: profileData.full_name || $centralizedAuth.user.email || "",
                 username: profileData.username || "",
                 avatar_url: profileData.avatar_url || "",
                 onboarding_complete: true,
@@ -141,7 +141,7 @@
             let existingProfile = null;
             try {
                 existingProfile = await dataStore.getUserProfile(
-                    $authStore.user.id,
+                    $centralizedAuth.user.id,
                 );
             } catch (error) {
                 console.log("No existing profile found, will create new one");
@@ -149,7 +149,7 @@
 
             if (existingProfile) {
                 // Update existing profile
-                await dataStore.updateUserProfile($authStore.user.id, {
+                await dataStore.updateUserProfile($centralizedAuth.user.id, {
                     full_name: profilePayload.full_name,
                     username: profilePayload.username,
                     avatar_url: profilePayload.avatar_url,
@@ -157,7 +157,7 @@
                 });
             } else {
                 // Create new profile
-                await dataStore.createUserProfile($authStore.user.id, {
+                await dataStore.createUserProfile($centralizedAuth.user.id, {
                     full_name: profilePayload.full_name,
                     username: profilePayload.username,
                     avatar_url: profilePayload.avatar_url,

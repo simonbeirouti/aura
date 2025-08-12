@@ -3,7 +3,8 @@
     import { goto } from '$app/navigation';
     import { invoke } from '@tauri-apps/api/core';
     import AppLayout from '$lib/components/AppLayout.svelte';
-    import { authStore } from '$lib/stores/supabaseAuth';
+    import { centralizedAuth } from '$lib/stores/unifiedAuth';
+    import { stripeStore } from '$lib/stores/stripeStore';
     import { cacheManager } from '$lib/stores/cacheManager';
     import { Card, CardContent, CardHeader, CardTitle } from '$lib/components/ui/card';
     import { Button } from '$lib/components/ui/button';
@@ -94,7 +95,8 @@
     async function purchasePackage() {
       if (!selectedPrice) return;
       
-      if (!$authStore.user?.id) {
+      const authState = await centralizedAuth.getState();
+      if (!authState.isAuthenticated || !authState.user?.id) {
         error = 'Please log in to make a purchase';
         toast.error('Please log in to make a purchase');
         return;
@@ -108,7 +110,7 @@
         const paymentIntent = await invoke('create_payment_intent', {
           amount: selectedPrice.amount,
           currency: selectedPrice.currency,
-          customerId: $authStore.user.id
+          customerId: authState.user.id
         });
   
         toast.success('Payment intent created! Integration with Stripe Elements needed.');

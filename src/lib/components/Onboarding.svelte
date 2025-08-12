@@ -1,6 +1,6 @@
 <script lang="ts">
     import { createEventDispatcher } from "svelte";
-    import { authStore } from "../stores/supabaseAuth";
+    import { centralizedAuth } from "../stores/unifiedAuth";
     import OnboardingIntro from "./onboarding/OnboardingIntro.svelte";
     import OnboardingSecurity from "./onboarding/OnboardingSecurity.svelte";
     import OnboardingAuth from "./onboarding/OnboardingAuth.svelte";

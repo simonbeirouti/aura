@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
   import { goto } from '$app/navigation';
-  import { authStore } from '$lib/stores/supabaseAuth';
+  import { centralizedAuth } from '$lib/stores/unifiedAuth';
   import { settingsActions, paymentMethodsStore, type PaymentMethod } from '$lib/stores/settingsStore';
   import { CreditCard, Plus } from 'lucide-svelte';
   import AppLayout from '$lib/components/AppLayout.svelte';
@@ -51,11 +51,12 @@
 
   onMount(async () => {
     try {
-      if (!$authStore.user) {
-        throw new Error('User not authenticated');
+      const authState = await centralizedAuth.getState();
+      if (!authState.isAuthenticated || !authState.user) {
+        error = 'User not authenticated';
+        return;
       }
-      
-      userId = $authStore.user.id;
+      userId = authState.user.id;
       
       // Initialize all settings data (includes payment methods and customer)
       await settingsActions.initialize();

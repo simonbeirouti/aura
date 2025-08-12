@@ -1,7 +1,7 @@
 import { writable, derived, get } from 'svelte/store';
 import { cacheManager, cacheKeys } from './cacheManager';
 import { settingsActions } from './settingsStore';
-import { authStore } from './supabaseAuth';
+import { centralizedAuth } from './unifiedAuth';
 import { dataActions } from './dataStore';
 import { stripeStore } from './stripeStore';
 
@@ -56,7 +56,7 @@ class StoreCoordinator {
 
     try {
       // Check if user is authenticated
-      const auth = get(authStore);
+      const auth = await centralizedAuth.getState();
       if (!auth.isAuthenticated || !auth.user?.id) {
         console.warn('Store coordinator: User not authenticated, skipping initialization');
         return;
@@ -91,7 +91,8 @@ class StoreCoordinator {
 
   // Initialize stores in optimal order
   private async initializeStores(): Promise<void> {
-    const userId = get(authStore).user?.id;
+    const auth = await centralizedAuth.getState();
+    const userId = auth.user?.id;
     if (!userId) return;
 
     // Check what's already cached to avoid unnecessary loads
@@ -135,7 +136,8 @@ class StoreCoordinator {
 
   // Smart refresh - only refresh stale data
   async smartRefresh(): Promise<void> {
-    const userId = get(authStore).user?.id;
+    const auth = await centralizedAuth.getState();
+    const userId = auth.user?.id;
     if (!userId) return;
 
     const refreshTasks: Promise<any>[] = [];
@@ -188,7 +190,8 @@ class StoreCoordinator {
 
   // Invalidate all user-specific cache
   invalidateUserCache(): void {
-    const userId = get(authStore).user?.id;
+    const auth = await centralizedAuth.getState();
+    const userId = auth.user?.id;
     if (userId) {
       cacheManager.invalidatePattern(cacheKeys.userPattern(userId));
       settingsActions.clearCache();
@@ -213,7 +216,7 @@ class StoreCoordinator {
 
   // Setup authentication listener
   private setupAuthListener(): void {
-    authStore.subscribe(async (auth) => {
+    centralizedAuth.subscribe(async (auth) => {
       if (!auth.isAuthenticated && get(this.store).isInitialized) {
         // User logged out
         await this.handleLogout();

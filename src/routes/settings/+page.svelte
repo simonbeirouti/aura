@@ -1,7 +1,7 @@
 <script lang="ts">
     import { onMount } from "svelte";
     import AppLayout from "../../lib/components/AppLayout.svelte";
-    import { authStore } from "../../lib/stores/supabaseAuth";
+    import { centralizedAuth } from "../../lib/stores/unifiedAuth";
     import { settingsActions, profileStore } from "../../lib/stores/settingsStore";
     import { goto } from "$app/navigation";
     import {
@@ -32,7 +32,7 @@
     }
 
     async function handleSignOut() {
-        await authStore.logout();
+        await centralizedAuth.handleLogout();
         // Don't use goto - let the layout handle the authentication state change
     }
 

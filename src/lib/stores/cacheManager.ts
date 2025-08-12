@@ -1,6 +1,6 @@
 import { writable, derived, get } from 'svelte/store';
 import { invoke } from '@tauri-apps/api/core';
-import { authStore } from './supabaseAuth';
+import { centralizedAuth } from './unifiedAuth';
 
 // Cache entry interface
 export interface CacheEntry<T = any> {

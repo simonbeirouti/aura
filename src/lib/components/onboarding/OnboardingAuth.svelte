@@ -1,6 +1,6 @@
 <script lang="ts">
     import { createEventDispatcher, onMount, onDestroy } from "svelte";
-    import { authStore } from "../../stores/supabaseAuth";
+    import { centralizedAuth } from "../../stores/unifiedAuth";
     import { toast } from "svelte-sonner";
 
     const dispatch = createEventDispatcher();
@@ -148,7 +148,7 @@
 
         try {
             if (isSignUp) {
-                await authStore.signUp(
+                await centralizedAuth.handleSignUp(
                     email.trim(),
                     password.trim(),
                 );
@@ -158,7 +158,7 @@
                 // Dispatch success event to parent
                 dispatch("authSuccess");
             } else {
-                await authStore.login(
+                await centralizedAuth.handleLogin(
                     email.trim(),
                     password.trim(),
                 );

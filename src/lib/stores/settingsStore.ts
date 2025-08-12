@@ -1,6 +1,6 @@
 import { writable, derived, get } from 'svelte/store';
 import { invoke } from '@tauri-apps/api/core';
-import { authStore } from './supabaseAuth';
+import { centralizedAuth } from './unifiedAuth';
 import { cacheManager, cacheKeys } from './cacheManager';
 
 // Payment method interface
@@ -83,10 +83,14 @@ const initialState: SettingsState = {
 // Create the store
 const settingsStore = writable<SettingsState>(initialState);
 
-// Helper function to get current user ID
+// Helper function to get current user ID (sync version using store state)
 function getCurrentUserId(): string | null {
-  const auth = get(authStore);
-  return auth.user?.id || null;
+  let userId: string | null = null;
+  const unsubscribe = centralizedAuth.subscribe(auth => {
+    userId = auth.user?.id || null;
+  });
+  unsubscribe();
+  return userId;
 }
 
 // Settings store actions
@@ -168,10 +172,8 @@ export const settingsActions = {
   },
 
   async updateProfile(updates: Partial<Profile>): Promise<Profile | null> {
-    const user = get(authStore).user;
-    if (!user) return null;
-
-    const userId = user.id;
+    const userId = getCurrentUserId();
+    if (!userId) return null;
 
     settingsStore.update(s => ({ ...s, profileLoading: true, profileError: null }));
 

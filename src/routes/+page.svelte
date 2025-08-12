@@ -3,7 +3,7 @@
   import { CogIcon, PlayIcon } from "lucide-svelte";
   import AppLayout from "../lib/components/AppLayout.svelte";
   import OnboardingProfile from "../lib/components/onboarding/OnboardingProfile.svelte";
-  import { authStore } from "../lib/stores/supabaseAuth";
+  import { centralizedAuth } from "../lib/stores/unifiedAuth";
   import { dataActions, dataStore } from "../lib/stores/dataStore";
   import { loadingActions } from "../lib/stores/loadingStore";
 
@@ -15,23 +15,24 @@
   let profileChecked = false;
 
   onMount(async () => {
-    // Only check onboarding if user is authenticated
-    if ($authStore.isAuthenticated && $authStore.user) {
-      await checkOnboardingStatus();
+    // Check onboarding status using centralized auth
+    const authState = await centralizedAuth.getState();
+    if (authState.isAuthenticated && authState.user) {
+      await checkOnboardingStatus(authState);
     } else {
       profileChecked = true;
     }
   });
 
-  async function checkOnboardingStatus() {
-    if (!$authStore.user) {
+  async function checkOnboardingStatus(authState: any) {
+    if (!authState.user) {
       profileChecked = true;
       return;
     }
 
     // Check if we already have profile data in the store
     const currentProfile = $dataStore.currentProfile;
-    if (currentProfile && currentProfile.id === $authStore.user.id) {
+    if (currentProfile && currentProfile.id === authState.user.id) {
       // We already have the profile data, no need to load
       needsOnboarding = !currentProfile.onboarding_complete;
       profileChecked = true;
@@ -51,7 +52,7 @@
 
       // Check if profile is now available after initialization
       const storeProfile = $dataStore.currentProfile;
-      if (storeProfile && storeProfile.id === $authStore.user.id) {
+      if (storeProfile && storeProfile.id === authState.user.id) {
         needsOnboarding = !storeProfile.onboarding_complete;
         profileChecked = true;
         return;
@@ -63,7 +64,7 @@
         showedLoading = true;
       }
 
-      const profile = await dataActions.getUserProfile($authStore.user.id, false);
+      const profile = await dataActions.getUserProfile(authState.user.id, false);
       
       // User needs onboarding if they don't have a profile or haven't completed onboarding
       needsOnboarding = !profile || !profile.onboarding_complete;
@@ -109,11 +110,11 @@
         </p>
       </CardHeader>
       <CardContent>
-        {#if $authStore.user}
-          <div class="bg-muted rounded-lg p-4 mb-6">
-            <p class="text-sm text-muted-foreground mb-1">Signed in as</p>
-            <p class="font-medium text-foreground">
-              {$authStore.user.email}
+        {#if $centralizedAuth.user}
+          <div class="text-center text-muted-foreground">
+            <p class="text-sm">
+              Welcome back,
+              {$centralizedAuth.user.email}
             </p>
           </div>
         {/if}

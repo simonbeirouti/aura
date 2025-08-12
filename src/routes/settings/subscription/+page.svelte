@@ -2,7 +2,7 @@
     import { onMount } from "svelte";
     import { goto } from "$app/navigation";
     import AppLayout from "../../../lib/components/AppLayout.svelte";
-    import { authStore } from "$lib/stores/supabaseAuth";
+    import { centralizedAuth } from "$lib/stores/unifiedAuth";
     import { settingsActions, subscriptionStore, paymentMethodsStore, profileStore } from '$lib/stores/settingsStore';
     import { cacheManager } from '$lib/stores/cacheManager';
     import { Card, CardContent, CardHeader, CardTitle } from "$lib/components/ui/card";
@@ -131,7 +131,7 @@
         error = null;
 
         try {
-            const userId = $authStore.user?.id;
+            const userId = $centralizedAuth.user?.id;
             if (!userId) {
                 throw new Error('User not authenticated');
             }
@@ -170,7 +170,7 @@
         cancellingSubscription = true;
         
         try {
-            const userId = $authStore.user?.id;
+            const userId = $centralizedAuth.user?.id;
             if (!userId) {
                 throw new Error('User not authenticated');
             }
