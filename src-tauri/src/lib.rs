@@ -161,6 +161,7 @@ pub fn run() {
             stripe::fix_payment_method_attachments,
             stripe::create_payment_intent,
             stripe::create_stripe_customer,
+            stripe::initialize_stripe_customer,
             stripe::get_or_create_customer,
             stripe::create_subscription,
             stripe::cancel_subscription,
@@ -182,7 +183,16 @@ pub fn run() {
             stripe::get_stored_payment_methods,
             stripe::set_default_payment_method_integrated,
             stripe::delete_payment_method_integrated,
-            stripe::create_payment_intent_with_stored_method
+            stripe::create_payment_intent_with_stored_method,
+            // Purchase completion commands
+            stripe::record_purchase,
+            stripe::complete_purchase,
+            stripe::verify_payment_intent,
+            stripe::create_missing_package,
+            stripe::create_missing_package_price,
+            stripe::debug_get_product_id_from_price,
+            stripe::debug_database_schema,
+            stripe::sync_stripe_prices_to_database
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

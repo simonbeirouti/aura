@@ -2,7 +2,7 @@
   import { onMount, onDestroy } from 'svelte';
   import { centralizedAuth } from '../stores/unifiedAuth';
   import { settingsStore } from '../stores/settingsStore';
-  import { stripeStore } from '../stores/stripeStore';
+  import { stripeStore, stripeUtils, stripeReady, stripeCustomer, stripeEnvironment } from '../stores/stripeStore';
   import { migrationStore } from '../stores/migrationStore';
   import { sessionStore } from '../stores/sessionStore';
   import { cacheManager, cacheStats } from '../stores/cacheManager';
@@ -20,6 +20,9 @@
   let authState: any = {};
   let settingsState: any = {};
   let stripeState: any = {};
+  let stripeReadyState: any = {};
+  let stripeCustomerState: any = {};
+  let stripeEnvironmentState: any = {};
   let migrationState: any = {};
   let sessionState: any = {};
   let cacheState: any = {};
@@ -31,8 +34,16 @@
   let databasePaymentMethods: any = null;
   let databaseError: string | null = null;
 
+  // Stripe sync data
+  let syncResult: string | null = null;
+  let syncError: string | null = null;
+  let syncing = false;
+
   // Subscriptions
   let unsubscribes: (() => void)[] = [];
+
+  // Detect if we're on mobile
+  let isMobile = false;
 
   onMount(() => {
     // Subscribe to all stores
@@ -40,17 +51,31 @@
       centralizedAuth.subscribe(state => authState = state),
       settingsStore.subscribe(state => settingsState = state),
       stripeStore.subscribe(state => stripeState = state),
+      stripeReady.subscribe(state => stripeReadyState = state),
+      stripeCustomer.subscribe(state => stripeCustomerState = state),
+      stripeEnvironment.subscribe(state => stripeEnvironmentState = state),
       migrationStore.subscribe(state => migrationState = state),
       sessionStore.subscribe(state => sessionState = state),
       cacheStats.subscribe(state => cacheState = state),
       coordinatorStats.subscribe(state => coordinatorState = state)
     ];
 
-    // Load position from localStorage
-    const savedPosition = localStorage.getItem('debugger-position');
-    if (savedPosition) {
-      position = JSON.parse(savedPosition);
+    // Check if we're on mobile
+    isMobile = window.innerWidth < 640;
+
+    // Load position from localStorage (only for desktop)
+    if (!isMobile) {
+      const savedPosition = localStorage.getItem('debugger-position');
+      if (savedPosition) {
+        position = JSON.parse(savedPosition);
+      }
     }
+
+    // Listen for window resize to update mobile state
+    const handleResize = () => {
+      isMobile = window.innerWidth < 640;
+    };
+    window.addEventListener('resize', handleResize);
 
     // Listen for keyboard shortcut (Ctrl+Shift+D)
     const handleKeydown = (e: KeyboardEvent) => {
@@ -64,6 +89,7 @@
     
     return () => {
       window.removeEventListener('keydown', handleKeydown);
+      window.removeEventListener('resize', handleResize);
     };
   });
 
@@ -75,24 +101,35 @@
     isVisible = !isVisible;
   }
 
-  function startDrag(e: MouseEvent) {
+  function startDrag(e: MouseEvent | TouchEvent) {
+    // Don't allow dragging on mobile (fullscreen mode)
+    if (isMobile) return;
+    
     isDragging = true;
+    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
+    const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
+    
     dragStart = {
-      x: e.clientX - position.x,
-      y: e.clientY - position.y
+      x: clientX - position.x,
+      y: clientY - position.y
     };
   }
 
-  function handleDrag(e: MouseEvent) {
-    if (!isDragging) return;
+  function handleDrag(e: MouseEvent | TouchEvent) {
+    if (!isDragging || isMobile) return;
+    
+    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
+    const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
     
     position = {
-      x: e.clientX - dragStart.x,
-      y: e.clientY - dragStart.y
+      x: clientX - dragStart.x,
+      y: clientY - dragStart.y
     };
     
-    // Save position to localStorage
-    localStorage.setItem('debugger-position', JSON.stringify(position));
+    // Save position to localStorage (only on desktop)
+    if (!isMobile) {
+      localStorage.setItem('debugger-position', JSON.stringify(position));
+    }
   }
 
   function stopDrag() {
@@ -157,6 +194,82 @@
     }
   }
 
+  async function createStripeCustomer() {
+    try {
+      databaseError = null;
+      const userId = authState.user?.id;
+      if (!userId) {
+        databaseError = 'No authenticated user';
+        return;
+      }
+      
+      console.log('🔄 Manually triggering Stripe customer creation for:', userId);
+      await stripeUtils.setUser(
+        userId, 
+        authState.user?.email,
+        authState.user?.user_metadata?.full_name || authState.user?.email
+      );
+      console.log('✅ Stripe customer creation triggered');
+    } catch (error) {
+      databaseError = error instanceof Error ? error.message : 'Stripe customer creation failed';
+      console.error('❌ Manual Stripe customer creation failed:', error);
+    }
+  }
+
+  async function testBackendStripe() {
+    try {
+      databaseError = null;
+      const userId = authState.user?.id;
+      if (!userId) {
+        databaseError = 'No authenticated user';
+        return;
+      }
+      
+      console.log('🔄 Testing backend Stripe customer call directly for:', userId);
+      const result = await invoke('get_or_create_customer', { 
+        email: authState.user?.email || '',
+        name: authState.user?.user_metadata?.full_name || authState.user?.email || ''
+      });
+      console.log('✅ Backend returned result:', result);
+      databaseProfile = { backendResult: result }; // Show in UI
+    } catch (error) {
+      databaseError = error instanceof Error ? error.message : 'Backend Stripe test failed';
+      console.error('❌ Backend Stripe test failed:', error);
+    }
+  }
+
+  async function debugDatabaseSchema() {
+    try {
+      databaseError = null;
+      console.log('🔄 Checking database schema...');
+      const result = await invoke('debug_database_schema');
+      console.log('✅ Database schema check result:', result);
+      databaseProfile = { schemaCheck: result }; // Show in UI
+    } catch (error) {
+      databaseError = error instanceof Error ? error.message : 'Database schema check failed';
+      console.error('❌ Database schema check failed:', error);
+    }
+  }
+
+  async function syncStripePrices() {
+    try {
+      databaseError = null;
+      const productId = import.meta.env.VITE_STRIPE_PACKAGE_PRODUCT_ID;
+      if (!productId) {
+        databaseError = 'VITE_STRIPE_PACKAGE_PRODUCT_ID not configured';
+        return;
+      }
+      
+      console.log('🔄 Syncing Stripe prices for product:', productId);
+      const result = await invoke('sync_stripe_prices_to_database', { stripeProductId: productId });
+      console.log('✅ Stripe prices sync result:', result);
+      databaseProfile = { priceSync: result }; // Show in UI
+    } catch (error) {
+      databaseError = error instanceof Error ? error.message : 'Stripe prices sync failed';
+      console.error('❌ Stripe prices sync failed:', error);
+    }
+  }
+
   function formatJson(obj: any) {
     if (obj === null || obj === undefined) return 'null';
     return JSON.stringify(obj, null, 2);
@@ -170,7 +283,12 @@
   }
 </script>
 
-<svelte:window on:mousemove={handleDrag} on:mouseup={stopDrag} />
+<svelte:window 
+  on:mousemove={handleDrag} 
+  on:mouseup={stopDrag}
+  on:touchmove={handleDrag}
+  on:touchend={stopDrag}
+/>
 
 <!-- Debug Toggle Button (always visible) -->
 <button
@@ -184,8 +302,11 @@
 {#if isVisible}
   <!-- Floating Debugger Window -->
   <div
-    class="fixed z-[9998] bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-lg shadow-2xl max-w-2xl max-h-[80vh] overflow-hidden"
-    style="left: {position.x}px; top: {position.y}px; min-width: 500px;"
+    class="fixed z-[9998] bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-lg shadow-2xl overflow-hidden
+           max-w-2xl max-h-[80vh] 
+           sm:min-w-[500px]
+           max-sm:left-2 max-sm:right-2 max-sm:top-16 max-sm:bottom-16 max-sm:w-auto max-sm:h-auto max-sm:max-h-none"
+    style="{!isMobile ? `left: ${position.x}px; top: ${position.y}px;` : ''}"
   >
     <!-- Header -->
     <div
@@ -193,6 +314,7 @@
       role="button"
       tabindex="0"
       on:mousedown={startDrag}
+      on:touchstart={startDrag}
       on:keydown={(e) => e.key === 'Enter' && e.preventDefault()}
     >
       <h3 class="font-semibold">🐛 Store Debugger</h3>
@@ -211,6 +333,7 @@
     <div class="flex border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
       {#each [
         { id: 'auth', label: 'Auth', color: getStatusColor(authState.isAuthenticated) },
+        { id: 'stripe', label: 'Stripe', color: getStatusColor(stripeReadyState) },
         { id: 'stores', label: 'Stores', color: getStatusColor(settingsState.isInitialized) },
         { id: 'migration', label: 'Migration', color: getStatusColor(migrationState.status) },
         { id: 'cache', label: 'Cache', color: getStatusColor(cacheState.size > 0) },
@@ -230,10 +353,10 @@
     </div>
 
     <!-- Content -->
-    <div class="p-4 overflow-auto max-h-96">
+    <div class="p-4 overflow-auto max-h-96 max-sm:max-h-[calc(100vh-12rem)]">
       {#if activeTab === 'auth'}
         <div class="space-y-3">
-          <div class="grid grid-cols-2 gap-4">
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-4">
             <Badge variant={authState.isAuthenticated ? 'default' : 'secondary'}>
               Authenticated: {authState.isAuthenticated}
             </Badge>
@@ -257,13 +380,62 @@
           </div>
 
           <div class="flex gap-2">
-            <button class="px-3 py-1 text-sm bg-blue-500 text-white rounded hover:bg-blue-600" on:click={reinitializeAuth}>Reinitialize Auth</button>
+            <button class="px-3 py-2 text-sm bg-blue-500 text-white rounded hover:bg-blue-600" on:click={reinitializeAuth}>Reinitialize Auth</button>
+          </div>
+        </div>
+
+      {:else if activeTab === 'stripe'}
+        <div class="space-y-3">
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            <Badge variant={stripeReadyState ? 'default' : 'secondary'}>
+              Ready: {stripeReadyState}
+            </Badge>
+            <Badge variant={stripeCustomerState.hasCustomer ? 'default' : 'secondary'}>
+              Customer: {stripeCustomerState.hasCustomer}
+            </Badge>
+            <Badge variant={stripeEnvironmentState.mode ? 'default' : 'secondary'}>
+              Mode: {stripeEnvironmentState.mode || 'none'}
+            </Badge>
+          </div>
+          
+          <div class="space-y-2">
+            <h4 class="font-semibold text-sm">Stripe Core:</h4>
+            <pre class="text-xs bg-gray-100 dark:bg-gray-800 p-2 rounded overflow-auto max-h-24">
+{formatJson({
+  isInitialized: stripeState.isInitialized,
+  isLoading: stripeState.isLoading,
+  error: stripeState.error,
+  hasStripe: !!stripeState.stripe,
+  environmentMode: stripeState.environmentMode,
+  lastInitialized: stripeState.lastInitialized
+})}
+            </pre>
+          </div>
+
+          <div class="space-y-2">
+            <h4 class="font-semibold text-sm">User Context:</h4>
+            <pre class="text-xs bg-gray-100 dark:bg-gray-800 p-2 rounded overflow-auto max-h-24">
+{formatJson({
+  userId: stripeCustomerState.userId,
+  customerId: stripeCustomerState.customerId,
+  subscriptionStatus: stripeState.subscriptionStatus.status,
+  subscriptionId: stripeState.subscriptionStatus.subscriptionId
+})}
+            </pre>
+          </div>
+
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            <button class="px-3 py-2 text-sm bg-purple-500 text-white rounded hover:bg-purple-600" on:click={() => stripeUtils.init(true)}>Reinit Stripe</button>
+            <button class="px-3 py-2 text-sm bg-blue-500 text-white rounded hover:bg-blue-600" on:click={createStripeCustomer}>Create Customer</button>
+            <button class="px-3 py-2 text-sm bg-green-500 text-white rounded hover:bg-green-600" on:click={testBackendStripe}>Test Backend</button>
+            <button class="px-3 py-2 text-sm bg-orange-500 text-white rounded hover:bg-orange-600" on:click={debugDatabaseSchema}>Check Schema</button>
+            <button class="px-3 py-2 text-sm bg-teal-500 text-white rounded hover:bg-teal-600" on:click={syncStripePrices}>Sync Prices</button>
           </div>
         </div>
 
       {:else if activeTab === 'stores'}
         <div class="space-y-3">
-          <div class="grid grid-cols-3 gap-2">
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
             <Badge variant={settingsState.isInitialized ? 'default' : 'secondary'}>
               Settings: {settingsState.isInitialized}
             </Badge>
@@ -297,7 +469,7 @@
 
       {:else if activeTab === 'migration'}
         <div class="space-y-3">
-          <div class="grid grid-cols-2 gap-4">
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-4">
             <Badge variant={migrationState.status === 'complete' ? 'default' : 'secondary'}>
               Status: {migrationState.status || 'unknown'}
             </Badge>
@@ -316,7 +488,7 @@
 
       {:else if activeTab === 'cache'}
         <div class="space-y-3">
-          <div class="grid grid-cols-3 gap-2">
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
             <Badge>Size: {cacheState.size || 0}</Badge>
             <Badge>Hits: {cacheState.hits || 0}</Badge>
             <Badge>Misses: {cacheState.misses || 0}</Badge>
@@ -333,16 +505,16 @@
           </div>
 
           <div class="flex gap-2">
-            <button class="px-3 py-1 text-sm bg-red-500 text-white rounded hover:bg-red-600" on:click={clearCache}>Clear Cache</button>
+            <button class="px-3 py-2 text-sm bg-red-500 text-white rounded hover:bg-red-600" on:click={clearCache}>Clear Cache</button>
           </div>
         </div>
 
       {:else if activeTab === 'database'}
         <div class="space-y-3">
-          <div class="flex gap-2 flex-wrap">
-            <button class="px-3 py-1 text-sm bg-blue-500 text-white rounded hover:bg-blue-600" on:click={checkDatabaseStatus}>Check DB Status</button>
-            <button class="px-3 py-1 text-sm bg-blue-500 text-white rounded hover:bg-blue-600" on:click={loadDatabaseProfile}>Load Profile</button>
-            <button class="px-3 py-1 text-sm bg-blue-500 text-white rounded hover:bg-blue-600" on:click={loadDatabasePaymentMethods}>Load Payment Methods</button>
+          <div class="flex flex-col sm:flex-row gap-2">
+            <button class="px-3 py-2 text-sm bg-blue-500 text-white rounded hover:bg-blue-600" on:click={checkDatabaseStatus}>Check DB Status</button>
+            <button class="px-3 py-2 text-sm bg-blue-500 text-white rounded hover:bg-blue-600" on:click={loadDatabaseProfile}>Load Profile</button>
+            <button class="px-3 py-2 text-sm bg-blue-500 text-white rounded hover:bg-blue-600" on:click={loadDatabasePaymentMethods}>Load Payment Methods</button>
           </div>
 
           {#if databaseError}

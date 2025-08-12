@@ -1,14 +1,25 @@
-import { writable } from 'svelte/store';
+import { writable, derived, get } from 'svelte/store';
 import { invoke } from '@tauri-apps/api/core';
 import { loadStripe, type Stripe, type StripeElements, type PaymentIntent } from '@stripe/stripe-js';
+import { cacheManager, cacheKeys } from './cacheManager';
 
 interface StripeState {
+  // Core Stripe instance
   stripe: Stripe | null;
   elements: StripeElements | null;
   publishableKey: string | null;
+  isInitialized: boolean;
   isLoading: boolean;
   error: string | null;
+  
+  // Current user context
+  currentCustomerId: string | null;
+  currentUserId: string | null;
+  
+  // Payment processing
   paymentIntent: PaymentIntent | null;
+  
+  // Subscription management
   subscriptionStatus: {
     subscriptionId: string | null;
     customerId: string | null;
@@ -16,6 +27,15 @@ interface StripeState {
     currentPeriodEnd: number | null;
     priceId: string | null;
   };
+  
+  // Global cache
+  customers: Map<string, any>;
+  paymentMethods: Map<string, any[]>;
+  subscriptions: Map<string, any>;
+  
+  // Initialization tracking
+  lastInitialized: number | null;
+  environmentMode: 'live' | 'test' | null;
 }
 
 interface PaymentIntentResponse {
@@ -41,8 +61,11 @@ class StripeStore {
     stripe: null,
     elements: null,
     publishableKey: null,
+    isInitialized: false,
     isLoading: false,
     error: null,
+    currentCustomerId: null,
+    currentUserId: null,
     paymentIntent: null,
     subscriptionStatus: {
       subscriptionId: null,
@@ -50,41 +73,181 @@ class StripeStore {
       status: null,
       currentPeriodEnd: null,
       priceId: null
-    }
+    },
+    customers: new Map(),
+    paymentMethods: new Map(),
+    subscriptions: new Map(),
+    lastInitialized: null,
+    environmentMode: null
   });
 
   public subscribe = this.store.subscribe;
 
+  // Set current user context for Stripe operations
+  async setUserContext(userId: string, userEmail?: string, userName?: string): Promise<void> {
+    if (!userId) {
+      console.warn('Invalid userId provided to setUserContext');
+      return;
+    }
+
+    console.log(`🔄 Setting Stripe user context for: ${userId}`);
+
+    // Get or create customer for this user
+    const customerId = await this.getOrCreateCustomer(userId, userEmail, userName);
+    
+    if (!customerId) {
+      console.error(`❌ Failed to get/create Stripe customer for user: ${userId}`);
+      // Still update with null to track the failure
+      this.store.update(state => ({
+        ...state,
+        currentUserId: userId,
+        currentCustomerId: null
+      }));
+      return;
+    }
+    
+    this.store.update(state => ({
+      ...state,
+      currentUserId: userId,
+      currentCustomerId: customerId
+    }));
+
+    console.log(`✅ Stripe user context set: ${userId} -> ${customerId}`);
+  }
+
+  // Clear user context (on logout)
+  clearUserContext(): void {
+    this.store.update(state => ({
+      ...state,
+      currentUserId: null,
+      currentCustomerId: null,
+      subscriptionStatus: {
+        subscriptionId: null,
+        customerId: null,
+        status: null,
+        currentPeriodEnd: null,
+        priceId: null
+      }
+    }));
+
+    console.log('🔄 Stripe user context cleared');
+  }
+
+  // Get or create Stripe customer for user
+  private async getOrCreateCustomer(userId: string, userEmail?: string, userName?: string): Promise<string | null> {
+    try {
+      console.log(`🔄 Getting/creating Stripe customer for user: ${userId}`);
+      
+      // Check cache first
+      const cacheKey = cacheKeys.stripeCustomer(userId);
+      const cached = cacheManager.get<string>(cacheKey);
+      if (cached) {
+        console.log(`✅ Found cached Stripe customer: ${cached}`);
+        return cached;
+      }
+
+      // Check store cache
+      const currentState = get(this.store);
+      if (currentState.customers.has(userId)) {
+        const storeCustomerId = currentState.customers.get(userId);
+        console.log(`✅ Found store cached Stripe customer: ${storeCustomerId}`);
+        return storeCustomerId;
+      }
+
+      // Get from backend
+      console.log(`🔄 Calling backend to get_or_create_customer for: ${userId}`);
+      const result = await invoke<any>('get_or_create_customer', { 
+        email: userEmail || '',
+        name: userName || ''
+      });
+      const customerId = result.id;
+      
+      if (!customerId) {
+        console.error(`❌ Backend returned null/empty customerId for user: ${userId}`);
+        return null;
+      }
+
+      console.log(`✅ Backend returned Stripe customer: ${customerId}`);
+      
+      // Cache the result
+      cacheManager.set(cacheKey, customerId, 60 * 60 * 1000); // 1 hour
+      
+      // Update store cache
+      this.store.update(state => ({
+        ...state,
+        customers: new Map(state.customers).set(userId, customerId)
+      }));
+
+      return customerId;
+    } catch (error) {
+      console.error(`❌ Failed to get/create Stripe customer for user ${userId}:`, error);
+      console.error('Error details:', {
+        message: error instanceof Error ? error.message : String(error),
+        type: typeof error,
+        error
+      });
+      return null;
+    }
+  }
+
   // Initialize Stripe with publishable key from backend
-  async initialize(): Promise<void> {
+  async initialize(forceReload: boolean = false): Promise<boolean> {
+    const currentState = get(this.store);
+    
+    // Return early if already initialized and not forcing reload
+    if (currentState.isInitialized && !forceReload) {
+      console.log('Stripe already initialized, skipping...');
+      return true;
+    }
+
     this.store.update(state => ({ ...state, isLoading: true, error: null }));
 
     try {
-      // Get publishable key from Tauri backend
-      const publishableKey = await invoke<string>('get_stripe_publishable_key');
+      // Get publishable key from Tauri backend with caching
+      const cacheKey = 'stripe_publishable_key';
+      let publishableKey = cacheManager.get<string>(cacheKey);
+      
+      if (!publishableKey || forceReload) {
+        publishableKey = await invoke<string>('get_stripe_publishable_key');
+        // Cache for 1 hour
+        cacheManager.set(cacheKey, publishableKey, 60 * 60 * 1000);
+      }
+      
+      // Detect environment mode
+      const environmentMode = publishableKey.startsWith('pk_live') ? 'live' : 'test';
       
       // Load Stripe
       const stripe = await loadStripe(publishableKey);
       
       if (!stripe) {
-        throw new Error('Failed to load Stripe');
+        throw new Error('Failed to load Stripe JavaScript SDK');
       }
 
       this.store.update(state => ({
         ...state,
         stripe,
         publishableKey,
-        isLoading: false
+        isInitialized: true,
+        isLoading: false,
+        environmentMode,
+        lastInitialized: Date.now(),
+        error: null
       }));
 
-      console.log('Stripe initialized successfully');
+      console.log(`✅ Stripe initialized successfully (${environmentMode} mode)`);
+      return true;
     } catch (error) {
-      console.error('Failed to initialize Stripe:', error);
+      console.error('❌ Failed to initialize Stripe:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Failed to initialize Stripe';
+      
       this.store.update(state => ({
         ...state,
-        error: error instanceof Error ? error.message : 'Failed to initialize Stripe',
-        isLoading: false
+        error: errorMessage,
+        isLoading: false,
+        isInitialized: false
       }));
+      
+      return false;
     }
   }
 
@@ -295,14 +458,73 @@ class StripeStore {
     this.store.update(state => ({ ...state, error: null }));
   }
 
+  // Get current Stripe instance (ensure it's initialized)
+  async getStripe(): Promise<Stripe | null> {
+    const state = get(this.store);
+    
+    if (!state.stripe && !state.isLoading) {
+      console.warn('Stripe not initialized, attempting to initialize...');
+      const success = await this.initialize();
+      if (!success) {
+        console.error('Failed to initialize Stripe');
+        return null;
+      }
+      return get(this.store).stripe;
+    }
+    
+    return state.stripe;
+  }
+
+  // Check if Stripe is ready for operations
+  isReady(): boolean {
+    const state = get(this.store);
+    return state.isInitialized && !!state.stripe && !state.isLoading;
+  }
+
+  // Get current user's customer ID
+  getCurrentCustomerId(): string | null {
+    const state = get(this.store);
+    return state.currentCustomerId;
+  }
+
+  // Get environment mode
+  getEnvironmentMode(): 'live' | 'test' | null {
+    const state = get(this.store);
+    return state.environmentMode;
+  }
+
+  // Global utility: Ensure Stripe is ready before operation
+  async ensureReady(): Promise<boolean> {
+    if (this.isReady()) {
+      return true;
+    }
+
+    if (get(this.store).isLoading) {
+      // Wait for current initialization
+      return new Promise((resolve) => {
+        const unsubscribe = this.store.subscribe((state) => {
+          if (!state.isLoading) {
+            unsubscribe();
+            resolve(state.isInitialized && !!state.stripe);
+          }
+        });
+      });
+    }
+
+    return await this.initialize();
+  }
+
   // Reset store state
   reset(): void {
     this.store.set({
       stripe: null,
       elements: null,
       publishableKey: null,
+      isInitialized: false,
       isLoading: false,
       error: null,
+      currentCustomerId: null,
+      currentUserId: null,
       paymentIntent: null,
       subscriptionStatus: {
         subscriptionId: null,
@@ -310,9 +532,126 @@ class StripeStore {
         status: null,
         currentPeriodEnd: null,
         priceId: null
-      }
+      },
+      customers: new Map(),
+      paymentMethods: new Map(),
+      subscriptions: new Map(),
+      lastInitialized: null,
+      environmentMode: null
     });
   }
 }
 
 export const stripeStore = new StripeStore();
+
+// Derived stores for common use cases
+export const stripeReady = derived(
+  stripeStore,
+  ($stripe) => $stripe.isInitialized && !!$stripe.stripe && !$stripe.isLoading
+);
+
+export const stripeCustomer = derived(
+  stripeStore,
+  ($stripe) => ({
+    customerId: $stripe.currentCustomerId,
+    userId: $stripe.currentUserId,
+    hasCustomer: !!$stripe.currentCustomerId
+  })
+);
+
+export const stripeEnvironment = derived(
+  stripeStore,
+  ($stripe) => ({
+    mode: $stripe.environmentMode,
+    isLive: $stripe.environmentMode === 'live',
+    isTest: $stripe.environmentMode === 'test',
+    publishableKey: $stripe.publishableKey
+  })
+);
+
+export const stripeSubscription = derived(
+  stripeStore,
+  ($stripe) => ({
+    ...$stripe.subscriptionStatus,
+    hasActiveSubscription: $stripe.subscriptionStatus.status === 'active',
+    isTrialing: $stripe.subscriptionStatus.status === 'trialing',
+    isPastDue: $stripe.subscriptionStatus.status === 'past_due',
+    isCanceled: $stripe.subscriptionStatus.status === 'canceled'
+  })
+);
+
+// Global Stripe utility functions
+export const stripeUtils = {
+  // Initialize and ensure Stripe is ready
+  async init(forceReload = false): Promise<boolean> {
+    return await stripeStore.initialize(forceReload);
+  },
+
+  // Get Stripe instance (auto-initialize if needed)
+  async getStripe(): Promise<Stripe | null> {
+    return await stripeStore.getStripe();
+  },
+
+  // Check if ready without initializing
+  isReady(): boolean {
+    return stripeStore.isReady();
+  },
+
+  // Ensure ready and throw if not
+  async ensureReady(): Promise<void> {
+    const ready = await stripeStore.ensureReady();
+    if (!ready) {
+      throw new Error('Stripe failed to initialize. Check your configuration.');
+    }
+  },
+
+  // Set user context for operations
+  async setUser(userId: string, userEmail?: string, userName?: string): Promise<void> {
+    await stripeStore.setUserContext(userId, userEmail, userName);
+  },
+
+  // Clear user context
+  clearUser(): void {
+    stripeStore.clearUserContext();
+  },
+
+  // Get current customer ID
+  getCustomerId(): string | null {
+    return stripeStore.getCurrentCustomerId();
+  },
+
+  // Check environment
+  getEnvironment(): 'live' | 'test' | null {
+    return stripeStore.getEnvironmentMode();
+  },
+
+  // Create payment intent with current user
+  async createPayment(amount: number, currency = 'usd'): Promise<PaymentIntentResponse> {
+    await stripeUtils.ensureReady();
+    const customerId = stripeStore.getCurrentCustomerId();
+    return await stripeStore.createPaymentIntent(amount, currency, customerId || undefined);
+  },
+
+  // Create subscription for current user
+  async createSubscription(): Promise<SubscriptionResponse> {
+    await stripeUtils.ensureReady();
+    const customerId = stripeStore.getCurrentCustomerId();
+    const userId = get(stripeStore).currentUserId;
+    
+    if (!customerId || !userId) {
+      throw new Error('No user context set. Call stripeUtils.setUser() first.');
+    }
+    
+    return await stripeStore.createSubscription(customerId, userId);
+  },
+
+  // Get subscription status for current user
+  async getSubscriptionStatus(): Promise<SubscriptionResponse | null> {
+    const subscription = get(stripeStore).subscriptionStatus;
+    if (!subscription.subscriptionId) {
+      return null;
+    }
+    
+    return await stripeStore.getSubscriptionStatus(subscription.subscriptionId);
+  }
+};

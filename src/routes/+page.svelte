@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { CogIcon, PlayIcon } from "lucide-svelte";
+  import { CogIcon, PlayIcon, CoinsIcon } from "lucide-svelte";
   import AppLayout from "../lib/components/AppLayout.svelte";
   import OnboardingProfile from "../lib/components/onboarding/OnboardingProfile.svelte";
   import { centralizedAuth } from "../lib/stores/unifiedAuth";
@@ -94,52 +94,38 @@
   <OnboardingProfile on:complete={handleProfileComplete} />
 {:else}
   <!-- Normal Home Page -->
-  <AppLayout maxWidth="max-w-2xl">
-    <div slot="header-actions">
-
-    </div>
-    
+  <AppLayout maxWidth="max-w-2xl">    
     <Card class="text-center">
       <CardHeader>
         <CardTitle class="text-4xl md:text-5xl font-bold text-primary mb-4">
           Hello there! 👋
         </CardTitle>
+        
+        <!-- Username and Token Balance -->
+        {#if $dataStore.currentProfile}
+          <div class="space-y-3 mb-6">
+            <!-- Username -->
+            {#if $dataStore.currentProfile.username}
+              <p class="text-xl text-muted-foreground">
+                @{$dataStore.currentProfile.username}
+              </p>
+            {/if}
+            
+            <!-- Token Balance -->
+            <div class="inline-flex items-center gap-2 bg-muted/50 rounded-lg px-4 py-2">
+              <CoinsIcon class="w-5 h-5 text-primary" />
+              <span class="text-lg font-semibold text-foreground">
+                {($dataStore.currentProfile.tokens_remaining || 0).toLocaleString()} tokens
+              </span>
+            </div>
+          </div>
+        {/if}
+        
         <p class="text-lg text-muted-foreground">
           Welcome to Aura! You're successfully authenticated and ready to
           explore.
         </p>
       </CardHeader>
-      <CardContent>
-        {#if $centralizedAuth.user}
-          <div class="text-center text-muted-foreground">
-            <p class="text-sm">
-              Welcome back,
-              {$centralizedAuth.user.email}
-            </p>
-          </div>
-        {/if}
-
-        <div class="space-y-4">
-          <Button
-            onclick={() => goto('/features')}
-            variant="default"
-            size="lg"
-            class="w-full gap-2"
-          >
-            <PlayIcon class="w-5 h-5" />
-            Explore Features
-          </Button>
-          <Button
-            onclick={() => goto('/settings')}
-            variant="outline"
-            size="lg"
-            class="w-full gap-2"
-          >
-            <CogIcon class="w-5 h-5" />
-            Settings
-          </Button>
-        </div>
-      </CardContent>
     </Card>
   </AppLayout>
 {/if}

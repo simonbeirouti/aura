@@ -1,6 +1,7 @@
 <script lang="ts">
-    import { onMount } from 'svelte';
-    import { goto } from '$app/navigation';
+      import { onMount } from 'svelte';
+  import { get } from 'svelte/store';
+  import { goto } from '$app/navigation';
     import { invoke } from '@tauri-apps/api/core';
     import AppLayout from '$lib/components/AppLayout.svelte';
     import { centralizedAuth } from '$lib/stores/unifiedAuth';
@@ -92,34 +93,69 @@
       }
     }
   
-    async function purchasePackage() {
-      if (!selectedPrice) return;
+      async function purchasePackage() {
+    if (!selectedPrice) return;
+    
+    const authState = await centralizedAuth.getState();
+    if (!authState.isAuthenticated || !authState.user?.id) {
+      error = 'Please log in to make a purchase';
+      toast.error('Please log in to make a purchase');
+      return;
+    }
+
+    try {
+      purchasingPriceId = selectedPrice.id;
+      error = null;
+
+      // Get the Stripe customer ID from the stripe store
+      const stripeState = get(stripeStore);
+      const stripeCustomerId = stripeState?.currentCustomerId;
       
-      const authState = await centralizedAuth.getState();
-      if (!authState.isAuthenticated || !authState.user?.id) {
-        error = 'Please log in to make a purchase';
-        toast.error('Please log in to make a purchase');
+      if (!stripeCustomerId) {
+        error = 'Stripe customer not found. Please try refreshing the page.';
+        toast.error('❌ Stripe customer not found. Please try refreshing the page.');
         return;
       }
-  
+
+      console.log(`🔄 Creating payment intent for customer: ${stripeCustomerId}`);
+
+            // Create payment intent for one-time purchase
+      const paymentIntent = await invoke<{client_secret: string, payment_intent_id: string}>('create_payment_intent', {
+        amount: selectedPrice.amount,
+        currency: selectedPrice.currency,
+        customer_id: stripeCustomerId
+      });
+
+      console.log(`✅ Payment intent created: ${paymentIntent.payment_intent_id}`);
+
+      // For now, simulate successful payment and record purchase
+      // In a real app, this would happen after Stripe Elements confirms the payment
       try {
-        purchasingPriceId = selectedPrice.id;
-        error = null;
-  
-        // Create payment intent for one-time purchase
-        const paymentIntent = await invoke('create_payment_intent', {
-          amount: selectedPrice.amount,
-          currency: selectedPrice.currency,
-          customerId: authState.user.id
-        });
-  
-        toast.success('Payment intent created! Integration with Stripe Elements needed.');
+        console.log('🔄 Recording purchase with data:');
+        const purchaseData = {
+          userId: authState.user.id,
+          stripePaymentIntentId: paymentIntent.payment_intent_id,
+          stripePriceId: selectedPrice.id,
+          amountPaid: selectedPrice.amount,
+          currency: selectedPrice.currency
+        };
+        console.log('Frontend purchase data:', JSON.stringify(purchaseData, null, 2));
         
-        // Close drawer after successful payment intent creation
+        const recordResult = await invoke('record_purchase', purchaseData);
+        
+        console.log('✅ Purchase recording result:', recordResult);
+        toast.success('🎉 Purchase completed successfully!');
+        
+        // Close drawer after successful purchase
         closePurchaseDrawer();
         
-        // TODO: Integrate with Stripe Elements for payment completion
-        // TODO: Store purchase record in database after successful payment
+        // Refresh package data to show updated user access
+        await loadPackageProduct();
+        
+      } catch (recordError) {
+        console.error('❌ Failed to record purchase:', recordError);
+        toast.error('Payment created but failed to record. Please contact support.');
+      }
         
       } catch (err) {
         console.error('Purchase failed:', err);

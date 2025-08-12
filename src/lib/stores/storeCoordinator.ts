@@ -189,7 +189,7 @@ class StoreCoordinator {
   }
 
   // Invalidate all user-specific cache
-  invalidateUserCache(): void {
+  async invalidateUserCache(): Promise<void> {
     const auth = await centralizedAuth.getState();
     const userId = auth.user?.id;
     if (userId) {
@@ -203,7 +203,7 @@ class StoreCoordinator {
   // Handle user logout
   async handleLogout(): Promise<void> {
     // Clear all caches
-    this.invalidateUserCache();
+    await this.invalidateUserCache();
     
     // Stop periodic sync
     this.stopPeriodicSync();

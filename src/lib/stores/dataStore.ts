@@ -15,6 +15,14 @@ export interface Profile {
   subscription_id?: string;
   subscription_status?: string;
   subscription_period_end?: number;
+  // Token balance fields
+  total_tokens?: number;
+  tokens_remaining?: number;
+  tokens_used?: number;
+  // Purchase tracking fields
+  total_purchases?: number;
+  total_spent_cents?: number;
+  last_purchase_at?: string;
 }
 
 // Data store state interface

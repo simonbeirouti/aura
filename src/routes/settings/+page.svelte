@@ -72,19 +72,19 @@
                         {/if}
                     </div>
                     
-                    <!-- Name and Username -->
+                    <!-- Username and Token Balance -->
                     <div class="flex-1 text-left">
-                        <div class="space-y-2">
+                        <div class="space-y-3">
                             <div>
-                                <p class="text-sm text-muted-foreground mb-1">Full Name</p>
+                                <p class="text-sm text-muted-foreground mb-1">Username</p>
                                 <p class="text-xl font-semibold text-foreground">
-                                    {profile?.full_name || 'Not set'}
+                                    @{profile?.username || 'Not set'}
                                 </p>
                             </div>
                             <div>
-                                <p class="text-sm text-muted-foreground mb-1">Username</p>
-                                <p class="text-lg text-foreground">
-                                    @{profile?.username || 'Not set'}
+                                <p class="text-sm text-muted-foreground mb-1">Token Balance</p>
+                                <p class="text-lg text-foreground font-medium">
+                                    {(profile?.tokens_remaining || 0).toLocaleString()} tokens
                                 </p>
                             </div>
                         </div>

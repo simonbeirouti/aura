@@ -1,6 +1,20 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::str::FromStr;
+use chrono;
+
+/// Calculate token amount based on price (matching the SQL function)
+fn get_token_amount_from_price(price_cents: i64) -> i64 {
+    match price_cents {
+        149 => 100,      // A$1.49 = 100 tokens
+        749 => 500,      // A$7.49 = 500 tokens
+        1499 => 1000,    // A$14.99 = 1000 tokens
+        3099 => 5000,    // A$30.99 = 5000 tokens
+        6299 => 25000,   // A$62.99 = 25000 tokens
+        15999 => 100000, // A$159.99 = 100000 tokens
+        _ => 100,        // Default fallback
+    }
+}
 use stripe::{
     Client, CreateCustomer, CreatePaymentIntent, CreateSubscription, CreatePrice, CreateProduct,
     Customer, PaymentIntent, Subscription, Price, Product, Currency, UpdateSubscription,
@@ -276,6 +290,26 @@ pub async fn create_stripe_customer(
         .map_err(|e| format!("Failed to create customer: {}", e))?;
 
     Ok(customer.id.to_string())
+}
+
+#[tauri::command]
+pub async fn initialize_stripe_customer(
+    user_id: String,
+) -> Result<String, String> {
+    println!("[Stripe] Initializing customer for user: {}", user_id);
+    
+    // For now, we'll create a customer with a placeholder email
+    // In a real implementation, you'd get the email from the user profile
+    let placeholder_email = format!("user+{}@aura.app", user_id);
+    
+    let customer_result = get_or_create_customer(placeholder_email, None).await?;
+    
+    let customer_id = customer_result["id"].as_str()
+        .ok_or("Failed to extract customer ID from response")?
+        .to_string();
+    
+    println!("[Stripe] Customer initialized: {}", customer_id);
+    Ok(customer_id)
 }
 
 #[tauri::command]
@@ -612,7 +646,7 @@ pub async fn get_product_with_prices(
         product_prices.push(ProductPrice {
             id: price.id.to_string(),
             amount: price.unit_amount.unwrap_or(0),
-            currency: price.currency.map(|c| c.to_string()).unwrap_or_else(|| "usd".to_string()),
+            currency: price.currency.map(|c| c.to_string()).unwrap_or("usd".to_string()),
             interval,
             interval_count,
         });
@@ -1153,4 +1187,622 @@ pub async fn create_payment_intent_with_stored_method(
         client_secret: payment_intent.client_secret.unwrap_or_default(),
         payment_intent_id: payment_intent.id.to_string(),
     })
+}
+
+/// Record a purchase in the database after successful payment
+#[tauri::command]
+pub async fn record_purchase(
+    user_id: String,
+    stripe_payment_intent_id: String,
+    stripe_price_id: String,
+    amount_paid: i64,
+    currency: String,
+    app: tauri::AppHandle,
+) -> Result<String, String> {
+    println!("[Purchase] ========== STARTING PURCHASE RECORDING ==========");
+    println!("[Purchase] Input parameters:");
+    println!("[Purchase]   user_id: {}", user_id);
+    println!("[Purchase]   stripe_payment_intent_id: {}", stripe_payment_intent_id);
+    println!("[Purchase]   stripe_price_id: {}", stripe_price_id);
+    println!("[Purchase]   amount_paid: {}", amount_paid);
+    println!("[Purchase]   currency: {}", currency);
+    
+    println!("[Purchase] Getting database configuration...");
+    let db_config = crate::database::get_authenticated_db(&app).await.map_err(|e| {
+        let error_msg = format!("Failed to get database config: {}", e);
+        println!("[Purchase] ERROR: {}", error_msg);
+        error_msg
+    })?;
+    
+    println!("[Purchase] Database config obtained:");
+    println!("[Purchase]   database_url: {}", db_config.database_url);
+    println!("[Purchase]   anon_key length: {}", db_config.anon_key.len());
+    println!("[Purchase]   access_token length: {}", db_config.access_token.len());
+    
+    let http_client = reqwest::Client::new();
+    
+    // First, get the product ID from Stripe to find the package
+    println!("[Purchase] Getting product info from Stripe for price: {}", stripe_price_id);
+    
+    let stripe_client = get_stripe_client()?;
+    let price_id = stripe::PriceId::from_str(&stripe_price_id).map_err(|e| {
+        format!("Invalid Stripe price ID: {}", e)
+    })?;
+    
+    let stripe_price = stripe::Price::retrieve(&stripe_client, &price_id, &[]).await.map_err(|e| {
+        format!("Failed to retrieve price from Stripe: {}", e)
+    })?;
+    
+    let stripe_product_id = match stripe_price.product {
+        Some(stripe::Expandable::Id(id)) => id.to_string(),
+        Some(stripe::Expandable::Object(product)) => product.id.to_string(),
+        None => return Err("Price has no associated product".to_string()),
+    };
+    
+    println!("[Purchase] Found Stripe product ID: {}", stripe_product_id);
+    
+    // Look up the package by stripe_product_id
+    let package_query_url = format!("{}/rest/v1/packages?select=id,name,stripe_product_id,token_amount,bonus_percentage,effective_token_amount&stripe_product_id=eq.{}", 
+        db_config.database_url, stripe_product_id);
+    
+    println!("[Purchase] Package query URL: {}", package_query_url);
+    
+    let package_response = http_client
+        .get(&package_query_url)
+        .header("Authorization", format!("Bearer {}", db_config.access_token))
+        .header("apikey", &db_config.anon_key)
+        .send()
+        .await
+        .map_err(|e| {
+            let error_msg = format!("Failed to query package data: {}", e);
+            println!("[Purchase] ERROR: {}", error_msg);
+            error_msg
+        })?;
+    
+    let package_response_text = package_response.text().await.map_err(|e| {
+        let error_msg = format!("Failed to read package response: {}", e);
+        println!("[Purchase] ERROR: {}", error_msg);
+        error_msg
+    })?;
+    
+    println!("[Purchase] Package query response: {}", package_response_text);
+    
+    let package_data: serde_json::Value = serde_json::from_str(&package_response_text).map_err(|e| {
+        let error_msg = format!("Failed to parse package response: {}", e);
+        println!("[Purchase] ERROR: {}", error_msg);
+        error_msg
+    })?;
+    
+    let package_array = package_data.as_array().ok_or("Package response is not an array")?;
+    
+    let package_id = if package_array.is_empty() {
+        println!("[Purchase] No package found, creating default package for product: {}", stripe_product_id);
+        
+        // Create a default package for this product
+        let create_package_data = serde_json::json!({
+            "name": "Token Packages",
+            "description": "Flexible token packages with bulk discounts",
+            "stripe_product_id": stripe_product_id,
+            "token_amount": 100,
+            "bonus_percentage": 0,
+            "features": ["Flexible token amounts", "Bulk discounts", "All features", "Priority support"]
+        });
+        
+        println!("[Purchase] Package creation data: {}", serde_json::to_string_pretty(&create_package_data).unwrap_or_default());
+        
+        let create_package_response = http_client
+            .post(&format!("{}/rest/v1/packages", db_config.database_url))
+            .header("Authorization", format!("Bearer {}", db_config.access_token))
+            .header("apikey", &db_config.anon_key)
+            .header("Content-Type", "application/json")
+            .header("Prefer", "return=representation")
+            .json(&create_package_data)
+            .send()
+            .await
+            .map_err(|e| {
+                let error_msg = format!("Failed to create package HTTP request: {}", e);
+                println!("[Purchase] ERROR: {}", error_msg);
+                error_msg
+            })?;
+        
+        println!("[Purchase] Package creation response status: {}", create_package_response.status());
+        
+        if !create_package_response.status().is_success() {
+            let status = create_package_response.status();
+            let error_text = create_package_response.text().await.unwrap_or_default();
+            return Err(format!("Failed to create package: HTTP {} - {}", status, error_text));
+        }
+        
+        let created_package_text = create_package_response.text().await.map_err(|e| format!("Failed to read created package response: {}", e))?;
+        let created_package_data: serde_json::Value = serde_json::from_str(&created_package_text).map_err(|e| format!("Failed to parse created package response: {}", e))?;
+        let created_package_array = created_package_data.as_array().ok_or("Created package response is not an array")?;
+        
+        if created_package_array.is_empty() {
+            return Err("Failed to get created package data".to_string());
+        }
+        
+        println!("[Purchase] Successfully created package for product: {}", stripe_product_id);
+        
+        // Extract the package ID from the newly created package
+        created_package_array[0]["id"].as_str()
+            .ok_or("Missing package id in created package")?
+            .to_string()
+    } else {
+        // Extract the package ID from existing package
+        package_array[0]["id"].as_str()
+            .ok_or("Missing package id")?
+            .to_string()
+    };
+    
+    // Look up or create the package_price record
+    let package_price_query_url = format!("{}/rest/v1/package_prices?select=id&stripe_price_id=eq.{}", 
+        db_config.database_url, stripe_price_id);
+    
+    let package_price_response = http_client
+        .get(&package_price_query_url)
+        .header("Authorization", format!("Bearer {}", db_config.access_token))
+        .header("apikey", &db_config.anon_key)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to query package price: {}", e))?;
+    
+    let package_price_text = package_price_response.text().await.map_err(|e| format!("Failed to read package price response: {}", e))?;
+    let package_price_data: serde_json::Value = serde_json::from_str(&package_price_text).map_err(|e| format!("Failed to parse package price response: {}", e))?;
+    let package_price_array = package_price_data.as_array().ok_or("Package price response is not an array")?;
+    
+    // For now, just proceed without package_price_id if it doesn't exist
+    // The database trigger will handle token calculation based on amount_paid
+    let package_price_id = if !package_price_array.is_empty() {
+        Some(package_price_array[0]["id"].as_str().ok_or("Missing package price id")?.to_string())
+    } else {
+        println!("[Purchase] No package_price found for {}, proceeding without it", stripe_price_id);
+        None
+    };
+    
+    println!("[Purchase] Found package info:");
+    println!("[Purchase]   package_id: {}", package_id);
+    println!("[Purchase]   package_price_id: {:?}", package_price_id);
+    println!("[Purchase]   stripe_product_id: {}", stripe_product_id);
+    
+    // Calculate token amount for this purchase
+    let token_amount = get_token_amount_from_price(amount_paid);
+    
+    // Create the purchase record with all required fields
+    let mut purchase_data = serde_json::json!({
+        "user_id": user_id,
+        "stripe_payment_intent_id": stripe_payment_intent_id,
+        "stripe_price_id": stripe_price_id,
+        "stripe_product_id": stripe_product_id,
+        "package_id": package_id,
+        "amount_paid": amount_paid,
+        "currency": currency,
+        "tokens_purchased": token_amount,
+        "status": "completed",
+        "completed_at": chrono::Utc::now().to_rfc3339()
+    });
+    
+    // Add package_price_id only if it exists
+    if let Some(price_id) = package_price_id {
+        purchase_data["package_price_id"] = serde_json::json!(price_id);
+    }
+    
+    println!("[Purchase] Constructed purchase data:");
+    println!("[Purchase] {}", serde_json::to_string_pretty(&purchase_data).unwrap_or_default());
+    
+    let request_url = format!("{}/rest/v1/purchases", db_config.database_url);
+    println!("[Purchase] Making POST request to: {}", request_url);
+    
+    let response = http_client
+        .post(&request_url)
+        .header("Authorization", format!("Bearer {}", db_config.access_token))
+        .header("apikey", &db_config.anon_key)
+        .header("Content-Type", "application/json")
+        .header("Prefer", "return=representation")
+        .json(&purchase_data)
+        .send()
+        .await
+        .map_err(|e| {
+            let error_msg = format!("Database request failed: {}", e);
+            println!("[Purchase] ERROR: {}", error_msg);
+            error_msg
+        })?;
+    
+    println!("[Purchase] Response received:");
+    println!("[Purchase]   Status: {}", response.status());
+    
+    let response_headers = response.headers().clone();
+    for (key, value) in response_headers.iter() {
+        println!("[Purchase]   Header {}: {:?}", key, value);
+    }
+    
+    if !response.status().is_success() {
+        let status = response.status();
+        let error_text = response.text().await.unwrap_or_default();
+        let error_msg = format!("Failed to record purchase: HTTP {} - {}", status, error_text);
+        println!("[Purchase] ERROR: {}", error_msg);
+        return Err(error_msg);
+    }
+    
+    let response_text = response.text().await.map_err(|e| {
+        let error_msg = format!("Failed to read response text: {}", e);
+        println!("[Purchase] ERROR: {}", error_msg);
+        error_msg
+    })?;
+    
+    println!("[Purchase] Raw response text: {}", response_text);
+    
+    let result: serde_json::Value = serde_json::from_str(&response_text).map_err(|e| {
+        let error_msg = format!("Failed to parse purchase response: {} - Response: {}", e, response_text);
+        println!("[Purchase] ERROR: {}", error_msg);
+        error_msg
+    })?;
+    
+    println!("[Purchase] Parsed response:");
+    println!("[Purchase] {}", serde_json::to_string_pretty(&result).unwrap_or_default());
+    println!("[Purchase] ========== PURCHASE RECORDING COMPLETE ==========");
+    
+    Ok(format!("Purchase recorded successfully: {}", result))
+}
+
+/// Complete a purchase by confirming payment and recording in database
+#[tauri::command]
+pub async fn complete_purchase(
+    payment_intent_id: String,
+    user_id: String,
+    app: tauri::AppHandle,
+) -> Result<String, String> {
+    println!("[Purchase] Completing purchase for payment intent: {}", payment_intent_id);
+    
+    let client = get_stripe_client()?;
+    
+    // Retrieve the payment intent from Stripe to get details
+    let payment_intent_stripe_id = stripe::PaymentIntentId::from_str(&payment_intent_id)
+        .map_err(|e| format!("Invalid payment intent ID: {}", e))?;
+    
+    let payment_intent = stripe::PaymentIntent::retrieve(&client, &payment_intent_stripe_id, &[])
+        .await
+        .map_err(|e| format!("Failed to retrieve payment intent: {}", e))?;
+    
+    // Check if payment was successful
+    if payment_intent.status != stripe::PaymentIntentStatus::Succeeded {
+        return Err(format!("Payment not successful. Status: {:?}", payment_intent.status));
+    }
+    
+    // Get metadata or charges to find the price information
+    let amount_paid = payment_intent.amount;
+    let currency = payment_intent.currency.to_string();
+    
+    // For now, we'll need to pass the price_id separately or store it in metadata
+    // In a real implementation, you'd store the price_id in the payment intent metadata
+    let stripe_price_id = payment_intent.metadata.get("price_id").cloned()
+        .unwrap_or_else(|| "unknown_price".to_string());
+    
+    // Record the purchase in the database
+    record_purchase(
+        user_id,
+        payment_intent_id,
+        stripe_price_id,
+        amount_paid,
+        currency,
+        app,
+    ).await?;
+    
+    Ok("Purchase completed successfully".to_string())
+}
+
+
+/// Verify payment intent status
+#[tauri::command]
+pub async fn verify_payment_intent(
+    payment_intent_id: String,
+) -> Result<serde_json::Value, String> {
+    println!("[Purchase] Verifying payment intent: {}", payment_intent_id);
+    
+    let client = get_stripe_client()?;
+    
+    let payment_intent_stripe_id = stripe::PaymentIntentId::from_str(&payment_intent_id)
+        .map_err(|e| format!("Invalid payment intent ID: {}", e))?;
+    
+    let payment_intent = stripe::PaymentIntent::retrieve(&client, &payment_intent_stripe_id, &[])
+        .await
+        .map_err(|e| format!("Failed to retrieve payment intent: {}", e))?;
+    
+    Ok(serde_json::json!({
+        "id": payment_intent.id.to_string(),
+        "status": payment_intent.status,
+        "amount": payment_intent.amount,
+        "currency": payment_intent.currency.to_string(),
+        "client_secret": payment_intent.client_secret,
+        "metadata": payment_intent.metadata
+    }))
+}
+
+/// Create the missing package_price record directly
+#[tauri::command]
+pub async fn create_missing_package_price(
+    app: tauri::AppHandle,
+) -> Result<String, String> {
+    println!("[Debug] Creating package_price for price_1Rv67RQdTny8lgOgb2EwXy2v");
+    
+    let db_config = crate::database::get_authenticated_db(&app).await.map_err(|e| {
+        format!("Failed to get database config: {}", e)
+    })?;
+    
+    let http_client = reqwest::Client::new();
+    
+    // First get the package ID
+    let package_response = http_client
+        .get(&format!("{}/rest/v1/packages?select=id&stripe_product_id=eq.prod_SqniwA0Verdhlk", db_config.database_url))
+        .header("Authorization", format!("Bearer {}", db_config.access_token))
+        .header("apikey", &db_config.anon_key)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to get package: {}", e))?;
+    
+    let package_text = package_response.text().await.map_err(|e| format!("Failed to read package response: {}", e))?;
+    let package_data: serde_json::Value = serde_json::from_str(&package_text).map_err(|e| format!("Failed to parse package response: {}", e))?;
+    let package_array = package_data.as_array().ok_or("Package response is not an array")?;
+    
+    if package_array.is_empty() {
+        return Err("Package not found - run create_missing_package first".to_string());
+    }
+    
+    let package_id = package_array[0]["id"].as_str().ok_or("Missing package id")?;
+    
+    // Create the package_price
+    let price_data = serde_json::json!({
+        "package_id": package_id,
+        "stripe_price_id": "price_1Rv67RQdTny8lgOgb2EwXy2v",
+        "amount_cents": 15999,
+        "currency": "aud",
+        "interval_type": "one_time",
+        "is_active": true
+    });
+    
+    let response = http_client
+        .post(&format!("{}/rest/v1/package_prices", db_config.database_url))
+        .header("Authorization", format!("Bearer {}", db_config.access_token))
+        .header("apikey", &db_config.anon_key)
+        .header("Content-Type", "application/json")
+        .header("Prefer", "return=representation")
+        .json(&price_data)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to create package price: {}", e))?;
+    
+    if !response.status().is_success() {
+        let status = response.status();
+        let error_text = response.text().await.unwrap_or_default();
+        return Err(format!("Failed to create package price: HTTP {} - {}", status, error_text));
+    }
+    
+    let response_text = response.text().await.map_err(|e| format!("Failed to read response: {}", e))?;
+    
+    Ok(format!("Package price created successfully: {}", response_text))
+}
+
+/// Create the missing package directly using SQL
+#[tauri::command]
+pub async fn create_missing_package(
+    app: tauri::AppHandle,
+) -> Result<String, String> {
+    println!("[Debug] Creating missing package for prod_SqniwA0Verdhlk");
+    
+    let db_config = crate::database::get_authenticated_db(&app).await.map_err(|e| {
+        format!("Failed to get database config: {}", e)
+    })?;
+    
+    let http_client = reqwest::Client::new();
+    
+    // Create the package
+    let package_data = serde_json::json!({
+        "name": "Token Packages",
+        "description": "Flexible token packages with bulk discounts",
+        "stripe_product_id": "prod_SqniwA0Verdhlk",
+        "token_amount": 100,
+        "bonus_percentage": 0,
+        "features": ["Flexible token amounts", "Bulk discounts", "All features", "Priority support"]
+    });
+    
+    let response = http_client
+        .post(&format!("{}/rest/v1/packages", db_config.database_url))
+        .header("Authorization", format!("Bearer {}", db_config.access_token))
+        .header("apikey", &db_config.anon_key)
+        .header("Content-Type", "application/json")
+        .header("Prefer", "return=representation")
+        .json(&package_data)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to create package: {}", e))?;
+    
+    if !response.status().is_success() {
+        let status = response.status();
+        let error_text = response.text().await.unwrap_or_default();
+        return Err(format!("Failed to create package: HTTP {} - {}", status, error_text));
+    }
+    
+    let response_text = response.text().await.map_err(|e| format!("Failed to read response: {}", e))?;
+    
+    Ok(format!("Package created successfully: {}", response_text))
+}
+
+/// Debug function to get Stripe product ID from a known price ID
+#[tauri::command]
+pub async fn debug_get_product_id_from_price(
+    price_id: String,
+) -> Result<String, String> {
+    println!("[Debug] Getting product ID for price: {}", price_id);
+    
+    let stripe_client = get_stripe_client()?;
+    let stripe_price_id = stripe::PriceId::from_str(&price_id).map_err(|e| {
+        format!("Invalid Stripe price ID: {}", e)
+    })?;
+    
+    let stripe_price = stripe::Price::retrieve(&stripe_client, &stripe_price_id, &[]).await.map_err(|e| {
+        format!("Failed to retrieve price from Stripe: {}", e)
+    })?;
+    
+    let product_id = match stripe_price.product {
+        Some(stripe::Expandable::Id(id)) => id.to_string(),
+        Some(stripe::Expandable::Object(product)) => product.id.to_string(),
+        None => return Err("Price has no associated product".to_string()),
+    };
+    
+    let amount = stripe_price.unit_amount.unwrap_or(0);
+    let currency = stripe_price.currency.map(|c| c.to_string()).unwrap_or("unknown".to_string());
+    
+    Ok(format!("Price: {} | Product: {} | Amount: {} {} | Use '{}' as your stripe_product_id in the database", 
+        price_id, product_id, amount, currency, product_id))
+}
+
+/// Debug function to check database schema
+#[tauri::command]
+pub async fn debug_database_schema(
+    app: tauri::AppHandle,
+) -> Result<String, String> {
+    println!("[Debug] Checking database schema...");
+    
+    let db_config = crate::database::get_authenticated_db(&app).await.map_err(|e| {
+        format!("Failed to get database config: {}", e)
+    })?;
+    
+    let http_client = reqwest::Client::new();
+    
+    // Check if purchases table exists
+    let response = http_client
+        .get(&format!("{}/rest/v1/purchases?limit=0", db_config.database_url))
+        .header("Authorization", format!("Bearer {}", db_config.access_token))
+        .header("apikey", &db_config.anon_key)
+        .send()
+        .await
+        .map_err(|e| format!("Database request failed: {}", e))?;
+    
+    println!("[Debug] Purchases table check status: {}", response.status());
+    let response_text = response.text().await.unwrap_or_default();
+    println!("[Debug] Purchases table response: {}", response_text);
+    
+    // Check profiles table structure
+    let profile_response = http_client
+        .get(&format!("{}/rest/v1/profiles?select=total_tokens,tokens_remaining,tokens_used&limit=1", db_config.database_url))
+        .header("Authorization", format!("Bearer {}", db_config.access_token))
+        .header("apikey", &db_config.anon_key)
+        .send()
+        .await
+        .map_err(|e| format!("Profile check failed: {}", e))?;
+    
+    println!("[Debug] Profiles token fields check status: {}", profile_response.status());
+    let profile_text = profile_response.text().await.unwrap_or_default();
+    println!("[Debug] Profiles response: {}", profile_text);
+    
+    Ok(format!("Schema check complete. Purchases: {} | Profiles: {}", response_text, profile_text))
+}
+
+/// Sync Stripe prices with database package_prices table
+#[tauri::command]
+pub async fn sync_stripe_prices_to_database(
+    stripe_product_id: String,
+    app: tauri::AppHandle,
+) -> Result<String, String> {
+    println!("[Sync] Syncing Stripe prices for product: {}", stripe_product_id);
+    
+    let stripe_client = get_stripe_client()?;
+    let db_config = crate::database::get_authenticated_db(&app).await.map_err(|e| {
+        format!("Failed to get database config: {}", e)
+    })?;
+    
+    let http_client = reqwest::Client::new();
+    
+    // First, find the package in our database by stripe_product_id
+    let package_query_url = format!("{}/rest/v1/packages?select=id,name&stripe_product_id=eq.{}", 
+        db_config.database_url, stripe_product_id);
+    
+    println!("[Sync] Querying package: {}", package_query_url);
+    
+    let package_response = http_client
+        .get(&package_query_url)
+        .header("Authorization", format!("Bearer {}", db_config.access_token))
+        .header("apikey", &db_config.anon_key)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to query package: {}", e))?;
+    
+    let package_text = package_response.text().await.map_err(|e| format!("Failed to read package response: {}", e))?;
+    println!("[Sync] Package response: {}", package_text);
+    
+    let package_data: serde_json::Value = serde_json::from_str(&package_text).map_err(|e| format!("Failed to parse package response: {}", e))?;
+    let package_array = package_data.as_array().ok_or("Package response is not an array")?;
+    
+    if package_array.is_empty() {
+        return Err(format!("No package found with stripe_product_id: {}", stripe_product_id));
+    }
+    
+    let package = &package_array[0];
+    let package_id = package["id"].as_str().ok_or("Missing package id")?;
+    let package_name = package["name"].as_str().unwrap_or("Unknown Package");
+    
+    println!("[Sync] Found package: {} ({})", package_name, package_id);
+    
+    // Get all prices for this product from Stripe
+    let mut list_params = stripe::ListPrices::new();
+    list_params.product = Some(stripe::IdOrCreate::Id(&stripe_product_id));
+    list_params.active = Some(true);
+    
+    let prices = stripe::Price::list(&stripe_client, &list_params)
+        .await
+        .map_err(|e| format!("Failed to list Stripe prices: {}", e))?;
+    
+    println!("[Sync] Found {} Stripe prices", prices.data.len());
+    
+    let mut synced_count = 0;
+    
+    // Insert each price into the database
+    for price in prices.data {
+        let interval_type = if let Some(recurring) = &price.recurring {
+            match recurring.interval {
+                stripe::RecurringInterval::Day => "day",
+                stripe::RecurringInterval::Week => "week", 
+                stripe::RecurringInterval::Month => "month",
+                stripe::RecurringInterval::Year => "year",
+            }
+        } else {
+            "one_time"
+        };
+        
+        let interval_count = price.recurring.as_ref()
+            .map(|r| r.interval_count as i64)
+            .unwrap_or(1);
+        
+        let price_data = serde_json::json!({
+            "package_id": package_id,
+            "stripe_price_id": price.id.to_string(),
+            "amount_cents": price.unit_amount.unwrap_or(0),
+            "currency": price.currency.map(|c| c.to_string()).unwrap_or("usd".to_string()),
+            "interval_type": interval_type,
+            "interval_count": interval_count,
+            "is_active": true
+        });
+        
+        println!("[Sync] Inserting price: {}", serde_json::to_string_pretty(&price_data).unwrap_or_default());
+        
+        let response = http_client
+            .post(&format!("{}/rest/v1/package_prices", db_config.database_url))
+            .header("Authorization", format!("Bearer {}", db_config.access_token))
+            .header("apikey", &db_config.anon_key)
+            .header("Content-Type", "application/json")
+            .header("Prefer", "resolution=merge-duplicates")
+            .json(&price_data)
+            .send()
+            .await
+            .map_err(|e| format!("Failed to insert price: {}", e))?;
+        
+        if response.status().is_success() {
+            synced_count += 1;
+            println!("[Sync] Successfully synced price: {}", price.id);
+        } else {
+            let error_text = response.text().await.unwrap_or_default();
+            println!("[Sync] WARNING: Failed to sync price {}: {}", price.id, error_text);
+        }
+    }
+    
+    Ok(format!("Synced {} prices for package '{}'", synced_count, package_name))
 }

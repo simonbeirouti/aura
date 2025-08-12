@@ -4,7 +4,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { sessionStore, sessionActions } from './sessionStore';
 import { storeManager } from './core/storeManager';
 import { loadingActions } from './loadingStore';
-import { stripeStore } from './stripeStore';
+import { stripeStore, stripeUtils } from './stripeStore';
 import { migrationStore } from './migrationStore';
 import { dataActions } from './dataStore';
 
@@ -163,7 +163,11 @@ class UnifiedAuthStore {
         if (!migrationSuccess) {
           console.warn('⚠️ Database migrations reported failure, but continuing...');
           // Don't fail completely - might be due to missing env vars on mobile
-          result.errors.push('Database migrations reported issues (may be expected on mobile)');
+          // Only show error on desktop platforms
+          const isMobile = /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+          if (!isMobile) {
+            result.errors.push('Database migrations reported issues');
+          }
         }
         result.migrationsComplete = true;
         this.store.update(state => ({ ...state, migrationStatus: 'complete' }));
@@ -177,9 +181,17 @@ class UnifiedAuthStore {
           result.migrationsComplete = true; // Allow app to continue
           this.store.update(state => ({ ...state, migrationStatus: 'complete' }));
         } else {
-          result.errors.push('Database migrations failed');
-          this.store.update(state => ({ ...state, migrationStatus: 'error' }));
-          return result;
+          // Only show error on desktop platforms
+          const isMobile = /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+          if (!isMobile) {
+            result.errors.push('Database migrations failed');
+            this.store.update(state => ({ ...state, migrationStatus: 'error' }));
+            return result;
+          } else {
+            // On mobile, allow app to continue even with migration failures
+            result.migrationsComplete = true;
+            this.store.update(state => ({ ...state, migrationStatus: 'complete' }));
+          }
         }
       }
 
@@ -212,12 +224,32 @@ class UnifiedAuthStore {
         this.store.update(s => ({ ...s, profileLoaded: true })); // No user, so profile is "loaded"
       }
 
-      // Step 5: Initialize Stripe (non-critical for core app functionality)
+      // Step 5: Initialize Stripe globally (non-critical for core app functionality)
       console.log('🔄 Initializing Stripe...');
       try {
-        await this.initializeStripe();
-        result.stripeReady = true;
-        console.log('✅ Stripe initialized');
+        const stripeSuccess = await stripeUtils.init();
+        if (stripeSuccess) {
+          result.stripeReady = true;
+          console.log('✅ Stripe initialized globally');
+          
+          // Set user context for Stripe if authenticated
+          const currentState = get(this.store);
+          if (authSuccess && currentState.user) {
+            try {
+              await stripeUtils.setUser(
+                currentState.user.id, 
+                currentState.user.email,
+                currentState.user.user_metadata?.full_name || currentState.user.email
+              );
+              console.log('✅ Stripe user context set');
+            } catch (stripeUserError) {
+              console.warn('⚠️ Failed to set Stripe user context:', stripeUserError);
+              // Don't fail completely for this
+            }
+          }
+        } else {
+          throw new Error('Stripe initialization returned false');
+        }
       } catch (error) {
         console.warn('⚠️ Failed to initialize Stripe:', error);
         // Don't add to errors if it's just missing env vars on mobile
@@ -488,7 +520,15 @@ class UnifiedAuthStore {
     loadingActions.showAuth('Signing you out...');
     
     try {
-      // Sign out from Supabase first
+      // Clear Stripe user context first
+      try {
+        stripeUtils.clearUser();
+        console.log('✅ Stripe user context cleared');
+      } catch (stripeError) {
+        console.warn('Failed to clear Stripe context:', stripeError);
+      }
+      
+      // Sign out from Supabase
       await supabase.auth.signOut();
       
       // Clear all application data

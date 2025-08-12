@@ -15,6 +15,14 @@ pub struct Profile {
     pub subscription_id: Option<String>,
     pub subscription_status: Option<String>,
     pub subscription_period_end: Option<i64>,
+    // Token balance fields
+    pub total_tokens: Option<i64>,
+    pub tokens_remaining: Option<i64>,
+    pub tokens_used: Option<i64>,
+    // Purchase tracking fields
+    pub total_purchases: Option<i32>,
+    pub total_spent_cents: Option<i64>,
+    pub last_purchase_at: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
