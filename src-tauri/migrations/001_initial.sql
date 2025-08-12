@@ -10,6 +10,10 @@ create table profiles (
   user_theme user_theme DEFAULT 'light', 
   full_name text,
   avatar_url text,
+  stripe_customer_id text,
+  subscription_id text,
+  subscription_status text,
+  subscription_period_end bigint,
 
   constraint username_length check (char_length(username) >= 3)
 );

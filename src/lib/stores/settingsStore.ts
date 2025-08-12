@@ -1,7 +1,7 @@
 import { writable, derived, get } from 'svelte/store';
 import { invoke } from '@tauri-apps/api/core';
 import { authStore } from './supabaseAuth';
-import { databaseStore } from './database';
+import { cacheManager, cacheKeys } from './cacheManager';
 
 // Payment method interface
 export interface PaymentMethod {
@@ -27,6 +27,10 @@ export interface Profile {
   full_name?: string;
   avatar_url?: string;
   onboarding_complete?: boolean;
+  stripe_customer_id?: string;
+  subscription_id?: string;
+  subscription_status?: string;
+  subscription_period_end?: number;
 }
 
 // Settings store state
@@ -35,20 +39,24 @@ interface SettingsState {
   profile: Profile | null;
   profileLoading: boolean;
   profileError: string | null;
-  profileLastFetch: number | null;
   
   // Payment methods data
   paymentMethods: PaymentMethod[];
   paymentMethodsLoading: boolean;
   paymentMethodsError: string | null;
-  paymentMethodsLastFetch: number | null;
+  
+  // Subscription data
+  subscriptionData: any | null;
+  subscriptionLoading: boolean;
+  subscriptionError: string | null;
   
   // Stripe data
   customerId: string | null;
   stripeInitialized: boolean;
   
-  // Cache settings
-  cacheTTL: number; // 5 minutes
+  // Loading coordination
+  isInitialized: boolean;
+  globalError: string | null;
 }
 
 // Initial state
@@ -56,66 +64,96 @@ const initialState: SettingsState = {
   profile: null,
   profileLoading: false,
   profileError: null,
-  profileLastFetch: null,
   
   paymentMethods: [],
   paymentMethodsLoading: false,
   paymentMethodsError: null,
-  paymentMethodsLastFetch: null,
+  
+  subscriptionData: null,
+  subscriptionLoading: false,
+  subscriptionError: null,
   
   customerId: null,
   stripeInitialized: false,
   
-  cacheTTL: 5 * 60 * 1000 // 5 minutes
+  isInitialized: false,
+  globalError: null
 };
 
 // Create the store
 const settingsStore = writable<SettingsState>(initialState);
 
-// Helper function to check if data is fresh
-function isCacheFresh(lastFetch: number | null, ttl: number): boolean {
-  if (!lastFetch) return false;
-  return Date.now() - lastFetch < ttl;
+// Helper function to get current user ID
+function getCurrentUserId(): string | null {
+  const auth = get(authStore);
+  return auth.user?.id || null;
 }
 
 // Settings store actions
 export const settingsActions = {
+  // Initialize all settings data
+  async initialize(): Promise<void> {
+    const userId = getCurrentUserId();
+    if (!userId) {
+      console.warn('Cannot initialize settings: User not authenticated');
+      return;
+    }
+
+    try {
+      // Load all data in parallel (will use cache if available)
+      // Each load function handles its own caching logic
+      await Promise.allSettled([
+        this.loadProfile(),
+        this.loadPaymentMethods(),
+        this.loadSubscription()
+      ]);
+
+      settingsStore.update(s => ({ ...s, isInitialized: true }));
+    } catch (error) {
+      console.error('Failed to initialize settings:', error);
+      settingsStore.update(s => ({ 
+        ...s, 
+        globalError: 'Failed to initialize settings',
+        isInitialized: true // Still mark as initialized to prevent loops
+      }));
+    }
+  },
+
   // Profile actions
   async loadProfile(forceRefresh = false): Promise<Profile | null> {
-    const state = get(settingsStore);
-    const user = get(authStore).user;
-    
-    if (!user) {
+    const userId = getCurrentUserId();
+    if (!userId) {
       settingsStore.update(s => ({ ...s, profileError: 'User not authenticated' }));
       return null;
     }
 
-    // Return cached data if fresh and not forcing refresh
-    if (!forceRefresh && state.profile && isCacheFresh(state.profileLastFetch, state.cacheTTL)) {
-      return state.profile;
+    // Simple cache check
+    const cacheKey = cacheKeys.profile(userId);
+    if (!forceRefresh && cacheManager.has(cacheKey)) {
+      const cached = cacheManager.get<Profile>(cacheKey);
+      if (cached) {
+        settingsStore.update(s => ({ ...s, profile: cached, profileError: null }));
+        return cached;
+      }
     }
 
-    // Set loading state only if we don't have cached data
-    if (!state.profile) {
-      settingsStore.update(s => ({ ...s, profileLoading: true, profileError: null }));
-    }
+    settingsStore.update(s => ({ ...s, profileLoading: true, profileError: null }));
 
     try {
-      // Initialize database if needed
-      if (!get(databaseStore).isInitialized) {
-        await databaseStore.initialize();
-      }
+      const profile = await invoke<Profile>('get_user_profile', { userId });
       
-      const profile = await databaseStore.getUserProfile(user.id);
+      // Cache the result
+      if (profile) {
+        cacheManager.set(cacheKey, profile, 5 * 60 * 1000);
+      }
       
       settingsStore.update(s => ({
         ...s,
         profile,
         profileLoading: false,
-        profileError: null,
-        profileLastFetch: Date.now()
+        profileError: null
       }));
-      
+
       return profile;
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Failed to load profile';
@@ -124,9 +162,8 @@ export const settingsActions = {
         profileLoading: false,
         profileError: errorMessage
       }));
-      
-      // Return cached data if available, even if stale
-      return state.profile;
+      console.error('Failed to load profile:', error);
+      return null;
     }
   },
 
@@ -134,8 +171,18 @@ export const settingsActions = {
     const user = get(authStore).user;
     if (!user) return null;
 
+    const userId = user.id;
+
+    settingsStore.update(s => ({ ...s, profileLoading: true, profileError: null }));
+
     try {
-      const updatedProfile = await databaseStore.updateUserProfile(user.id, updates);
+      const updatedProfile = await invoke<Profile>('update_user_profile', {
+        userId,
+        username: updates.username,
+        fullName: updates.full_name,
+        avatarUrl: updates.avatar_url,
+        onboardingComplete: updates.onboarding_complete
+      });
       
       settingsStore.update(s => ({
         ...s,
@@ -153,91 +200,76 @@ export const settingsActions = {
 
   // Payment methods actions
   async loadPaymentMethods(forceRefresh = false): Promise<PaymentMethod[]> {
-    const state = get(settingsStore);
-    const user = get(authStore).user;
-    
-    if (!user) {
+    const userId = getCurrentUserId();
+    if (!userId) {
       settingsStore.update(s => ({ ...s, paymentMethodsError: 'User not authenticated' }));
       return [];
     }
 
-    // Return cached data if fresh and not forcing refresh
-    if (!forceRefresh && state.paymentMethods.length > 0 && isCacheFresh(state.paymentMethodsLastFetch, state.cacheTTL)) {
-      return state.paymentMethods;
+    // Simple cache check
+    const cacheKey = cacheKeys.paymentMethods(userId);
+    if (!forceRefresh && cacheManager.has(cacheKey)) {
+      const cached = cacheManager.get<PaymentMethod[]>(cacheKey);
+      if (cached) {
+        settingsStore.update(s => ({ ...s, paymentMethods: cached, paymentMethodsError: null }));
+        return cached;
+      }
     }
 
-    // Set loading state only if we don't have cached data
-    if (state.paymentMethods.length === 0) {
-      settingsStore.update(s => ({ ...s, paymentMethodsLoading: true, paymentMethodsError: null }));
-    }
+    settingsStore.update(s => ({ ...s, paymentMethodsLoading: true, paymentMethodsError: null }));
 
     try {
-      // Ensure we have customer ID
-      if (!state.customerId) {
-        await settingsActions.initializeCustomer();
-      }
+      // Initialize customer if needed
+      await this.initializeCustomer();
+
+      const paymentMethods = await invoke<PaymentMethod[]>('get_stored_payment_methods', { userId });
       
-      const paymentMethods = await invoke<PaymentMethod[]>('get_stored_payment_methods', {
-        userId: user.id
-      });
+      // Cache the result
+      if (paymentMethods) {
+        cacheManager.set(cacheKey, paymentMethods, 3 * 60 * 1000);
+      }
       
       settingsStore.update(s => ({
         ...s,
-        paymentMethods,
+        paymentMethods: paymentMethods || [],
         paymentMethodsLoading: false,
-        paymentMethodsError: null,
-        paymentMethodsLastFetch: Date.now()
+        paymentMethodsError: null
       }));
-      
-      return paymentMethods;
+
+      return paymentMethods || [];
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Failed to load payment methods';
-      
-      // Try fallback to Stripe API if database fails
-      try {
-        const state = get(settingsStore);
-        if (state.customerId) {
-          const paymentMethods = await invoke<PaymentMethod[]>('list_payment_methods', {
-            customerId: state.customerId
-          });
-          
-          settingsStore.update(s => ({
-            ...s,
-            paymentMethods,
-            paymentMethodsLoading: false,
-            paymentMethodsError: null,
-            paymentMethodsLastFetch: Date.now()
-          }));
-          
-          return paymentMethods;
-        }
-      } catch (fallbackError) {
-        console.error('Fallback to Stripe also failed:', fallbackError);
-      }
-      
       settingsStore.update(s => ({
         ...s,
         paymentMethodsLoading: false,
         paymentMethodsError: errorMessage
       }));
-      
-      // Return cached data if available, even if stale
-      return state.paymentMethods;
+      console.error('Failed to load payment methods:', error);
+      return [];
     }
   },
 
   async initializeCustomer(): Promise<string | null> {
-    const user = get(authStore).user;
-    if (!user) return null;
+    const userId = getCurrentUserId();
+    if (!userId) return null;
+
+    const cacheKey = cacheKeys.stripeCustomer(userId);
+    
+    // Try cache first
+    const cached = cacheManager.get<string>(cacheKey);
+    if (cached) {
+      settingsStore.update(s => ({ ...s, customerId: cached }));
+      return cached;
+    }
 
     try {
-      const customer = await invoke<{id: string}>('get_or_create_customer', {
-        email: user.email || '',
-        name: user.user_metadata?.full_name || user.email || 'Unknown User'
-      });
+      const customerId = await invoke<string>('initialize_stripe_customer', { userId });
       
-      settingsStore.update(s => ({ ...s, customerId: customer.id }));
-      return customer.id;
+      // Cache customer ID for longer (1 hour)
+      cacheManager.set(cacheKey, customerId, 60 * 60 * 1000);
+      
+      settingsStore.update(s => ({ ...s, customerId }));
+      return customerId;
     } catch (error) {
       console.error('Failed to initialize customer:', error);
       return null;
@@ -245,49 +277,229 @@ export const settingsActions = {
   },
 
   async addPaymentMethod(paymentMethod: PaymentMethod): Promise<void> {
+    const userId = getCurrentUserId();
+    if (!userId) return;
+
+    // Update store immediately
     settingsStore.update(s => ({
       ...s,
-      paymentMethods: [...s.paymentMethods, paymentMethod],
-      paymentMethodsLastFetch: Date.now()
+      paymentMethods: [...s.paymentMethods, paymentMethod]
     }));
+
+    // Update cache
+    const cacheKey = cacheKeys.paymentMethods(userId);
+    const current = cacheManager.get<PaymentMethod[]>(cacheKey) || [];
+    cacheManager.set(cacheKey, [...current, paymentMethod], 3 * 60 * 1000);
   },
 
   async removePaymentMethod(paymentMethodId: string): Promise<void> {
+    const userId = getCurrentUserId();
+    if (!userId) return;
+
+    // Update store immediately
     settingsStore.update(s => ({
       ...s,
-      paymentMethods: s.paymentMethods.filter(pm => pm.id !== paymentMethodId),
-      paymentMethodsLastFetch: Date.now()
+      paymentMethods: s.paymentMethods.filter(pm => pm.id !== paymentMethodId)
     }));
+
+    // Update cache
+    const cacheKey = cacheKeys.paymentMethods(userId);
+    const current = cacheManager.get<PaymentMethod[]>(cacheKey) || [];
+    cacheManager.set(cacheKey, current.filter(pm => pm.id !== paymentMethodId), 3 * 60 * 1000);
   },
 
-  // Background refresh actions
+  // Background refresh actions (smart refresh only when needed)
   async refreshProfileInBackground(): Promise<void> {
+    const userId = getCurrentUserId();
+    if (!userId) return;
+
+    const cacheKey = cacheKeys.profile(userId);
+    
+    // Only refresh if cache is getting stale (80% of TTL)
+    if (cacheManager.has(cacheKey)) {
+      const entry = cacheManager.get(cacheKey);
+      if (entry) return; // Still fresh, no need to refresh
+    }
+
     try {
-      await settingsActions.loadProfile(true);
+      await this.loadProfile(true);
     } catch (error) {
       console.warn('Background profile refresh failed:', error);
     }
   },
 
   async refreshPaymentMethodsInBackground(): Promise<void> {
+    const userId = getCurrentUserId();
+    if (!userId) return;
+
+    const cacheKey = cacheKeys.paymentMethods(userId);
+    
+    // Only refresh if cache is getting stale
+    if (cacheManager.has(cacheKey)) {
+      return; // Still fresh
+    }
+
     try {
-      await settingsActions.loadPaymentMethods(true);
+      await this.loadPaymentMethods(true);
     } catch (error) {
       console.warn('Background payment methods refresh failed:', error);
     }
   },
 
+  // Subscription actions
+  async loadSubscription(forceRefresh = false): Promise<any | null> {
+    const userId = getCurrentUserId();
+    if (!userId) {
+      settingsStore.update(s => ({ ...s, subscriptionError: 'User not authenticated' }));
+      return null;
+    }
+
+    // Simple cache check
+    const cacheKey = cacheKeys.subscription(userId);
+    if (!forceRefresh && cacheManager.has(cacheKey)) {
+      const cached = cacheManager.get<any>(cacheKey);
+      if (cached) {
+        settingsStore.update(s => ({ ...s, subscriptionData: cached, subscriptionError: null }));
+        return cached;
+      }
+    }
+
+    settingsStore.update(s => ({ ...s, subscriptionLoading: true, subscriptionError: null }));
+
+    try {
+      // Get subscription data from profile first
+      const profile = await invoke<Profile>('get_user_profile', { userId });
+      
+      let subscriptionData = null;
+      if (profile?.subscription_id) {
+        try {
+          subscriptionData = await invoke<any>('get_subscription', {
+            subscriptionId: profile.subscription_id
+          });
+        } catch (subError) {
+          console.warn('Failed to get subscription details:', subError);
+          // Use profile data as fallback
+          subscriptionData = {
+            subscription_id: profile.subscription_id,
+            status: profile.subscription_status,
+            current_period_end: profile.subscription_period_end
+          };
+        }
+      }
+      
+      // Cache the result
+      cacheManager.set(cacheKey, subscriptionData, 2 * 60 * 1000);
+      
+      settingsStore.update(s => ({
+        ...s,
+        subscriptionData,
+        subscriptionLoading: false,
+        subscriptionError: null
+      }));
+
+      return subscriptionData;
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to load subscription';
+      settingsStore.update(s => ({
+        ...s,
+        subscriptionLoading: false,
+        subscriptionError: errorMessage
+      }));
+      console.error('Failed to load subscription:', error);
+      return null;
+    }
+  },
+
+  async syncSubscription(userId: string, subscriptionId: string): Promise<any | null> {
+    try {
+      const subscriptionData = await invoke<any>('sync_subscription', {
+        userId,
+        subscriptionId
+      });
+      
+      // Update cache immediately
+      const cacheKey = cacheKeys.subscription(userId);
+      cacheManager.set(cacheKey, subscriptionData, 2 * 60 * 1000);
+      
+      settingsStore.update(s => ({
+        ...s,
+        subscriptionData
+      }));
+
+      // Also refresh profile to get updated subscription fields
+      await this.loadProfile(true);
+
+      return subscriptionData;
+    } catch (error) {
+      console.error('Failed to sync subscription:', error);
+      return null;
+    }
+  },
+
+  async refreshSubscriptionInBackground(): Promise<void> {
+    const userId = getCurrentUserId();
+    if (!userId) return;
+
+    const cacheKey = cacheKeys.subscription(userId);
+    
+    // Only refresh if cache is getting stale
+    if (cacheManager.has(cacheKey)) {
+      return; // Still fresh
+    }
+
+    try {
+      await this.loadSubscription(true);
+    } catch (error) {
+      console.warn('Background subscription refresh failed:', error);
+    }
+  },
+
   // Cache management
   clearCache(): void {
-    settingsStore.set(initialState);
+    const userId = getCurrentUserId();
+    if (userId) {
+      // Clear all user-specific cache entries
+      cacheManager.invalidatePattern(cacheKeys.userPattern(userId));
+    }
+    
+    // Reset store state
+    settingsStore.update(s => ({
+      ...s,
+      profile: null,
+      paymentMethods: [],
+      subscriptionData: null,
+      isInitialized: false
+    }));
   },
 
   invalidateProfileCache(): void {
-    settingsStore.update(s => ({ ...s, profileLastFetch: null }));
+    const userId = getCurrentUserId();
+    if (userId) {
+      cacheManager.delete(cacheKeys.profile(userId));
+    }
   },
 
   invalidatePaymentMethodsCache(): void {
-    settingsStore.update(s => ({ ...s, paymentMethodsLastFetch: null }));
+    const userId = getCurrentUserId();
+    if (userId) {
+      cacheManager.delete(cacheKeys.paymentMethods(userId));
+    }
+  },
+
+  invalidateSubscriptionCache(): void {
+    const userId = getCurrentUserId();
+    if (userId) {
+      cacheManager.delete(cacheKeys.subscription(userId));
+    }
+  },
+
+  // Force refresh all data
+  async refreshAll(): Promise<void> {
+    await Promise.allSettled([
+      this.loadProfile(true),
+      this.loadPaymentMethods(true),
+      this.loadSubscription(true)
+    ]);
   }
 };
 
@@ -308,6 +520,15 @@ export const paymentMethodsStore = derived(
     loading: $settings.paymentMethodsLoading,
     error: $settings.paymentMethodsError,
     customerId: $settings.customerId
+  })
+);
+
+export const subscriptionStore = derived(
+  settingsStore,
+  $settings => ({
+    subscriptionData: $settings.subscriptionData,
+    loading: $settings.subscriptionLoading,
+    error: $settings.subscriptionError
   })
 );
 

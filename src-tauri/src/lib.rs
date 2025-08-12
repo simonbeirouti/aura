@@ -59,7 +59,7 @@ fn validate_stripe_environment() {
     let required_vars = [
         "STRIPE_SECRET_KEY",
         "STRIPE_PUBLISHABLE_KEY",
-        "STRIPE_PRODUCT_ID",
+        "VITE_STRIPE_PRODUCT_ID",
     ];
     
     let mut missing_vars = Vec::new();
@@ -128,6 +128,7 @@ pub fn run() {
             enhanced_store::store_health,
             // Stripe payment processing commands
             stripe::get_stripe_publishable_key,
+            stripe::fix_payment_method_attachments,
             stripe::create_payment_intent,
             stripe::create_stripe_customer,
             stripe::get_or_create_customer,

@@ -90,7 +90,7 @@ pub async fn init_database(
 }
 
 /// Get authenticated database connection
-async fn get_authenticated_db(app: &tauri::AppHandle) -> Result<DatabaseConfig, String> {
+pub async fn get_authenticated_db(app: &tauri::AppHandle) -> Result<DatabaseConfig, String> {
     // Get database URL from database store
     let db_store = app.store("database.store").map_err(|e| e.to_string())?;
     let database_url = db_store

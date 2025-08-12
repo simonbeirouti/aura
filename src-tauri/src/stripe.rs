@@ -27,6 +27,7 @@ pub struct SubscriptionResponse {
     pub customer_id: String,
     pub status: String,
     pub current_period_end: i64,
+    pub price_id: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -101,10 +102,114 @@ fn get_stripe_config() -> Result<StripeConfig, String> {
     })
 }
 
+// Get only publishable key for payment method operations (doesn't require product ID)
+fn get_stripe_publishable_key_only() -> Result<String, String> {
+    // Try compile-time environment variables first (for mobile platforms)
+    let publishable_key = if !env!("STRIPE_PUBLISHABLE_KEY").is_empty() {
+        env!("STRIPE_PUBLISHABLE_KEY").to_string()
+    } else {
+        std::env::var("STRIPE_PUBLISHABLE_KEY")
+            .map_err(|_| "STRIPE_PUBLISHABLE_KEY environment variable not set".to_string())?
+    };
+    
+    Ok(publishable_key)
+}
+
 #[tauri::command]
 pub async fn get_stripe_publishable_key() -> Result<String, String> {
-    let config = get_stripe_config()?;
-    Ok(config.publishable_key)
+    get_stripe_publishable_key_only()
+}
+
+/// Fix existing payment methods by properly attaching them to the customer
+#[tauri::command]
+pub async fn fix_payment_method_attachments(
+    customer_id: String,
+    user_id: String,
+    app: tauri::AppHandle,
+) -> Result<String, String> {
+    let client = get_stripe_client()?;
+    
+    // Get payment methods from database for this user
+    let db_config = crate::database::get_authenticated_db(&app).await.map_err(|e| {
+        format!("Failed to get database config: {}", e)
+    })?;
+    
+    let http_client = reqwest::Client::new();
+    let response = http_client
+        .get(&format!("{}/rest/v1/payment_methods", db_config.database_url))
+        .header("Authorization", format!("Bearer {}", db_config.access_token))
+        .header("apikey", &db_config.anon_key)
+        .query(&[("user_id", format!("eq.{}", user_id))])
+        .send()
+        .await
+        .map_err(|e| format!("Database request failed: {}", e))?;
+    
+    if !response.status().is_success() {
+        return Err(format!("Database query failed: HTTP {}", response.status()));
+    }
+    
+    let payment_methods: Vec<crate::database::PaymentMethod> = response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse payment methods: {}", e))?;
+    
+    let mut fixed_count = 0;
+    
+    for pm in payment_methods {
+        let pm_id = stripe::PaymentMethodId::from_str(&pm.stripe_payment_method_id).map_err(|e| {
+            format!("Invalid payment method ID {}: {}", pm.stripe_payment_method_id, e)
+        })?;
+        
+        // Check if payment method exists and get its current state
+        let payment_method = match stripe::PaymentMethod::retrieve(&client, &pm_id, &[]).await {
+            Ok(pm) => pm,
+            Err(e) => {
+                eprintln!("Warning: Could not retrieve payment method {}: {}", pm.stripe_payment_method_id, e);
+                continue;
+            }
+        };
+        
+        // Attach payment method to customer if not already attached
+        if payment_method.customer.is_none() {
+            let customer_id_stripe = stripe::CustomerId::from_str(&customer_id).map_err(|e| {
+                format!("Invalid customer ID: {}", e)
+            })?;
+            
+            match stripe::PaymentMethod::attach(
+                &client,
+                &pm_id,
+                stripe::AttachPaymentMethod {
+                    customer: customer_id_stripe.clone(),
+                },
+            ).await {
+                Ok(_) => {
+                    println!("Successfully attached payment method {} to customer {}", pm.stripe_payment_method_id, customer_id);
+                    fixed_count += 1;
+                    
+                    // Set as default payment method if it's marked as default in database
+                    if pm.is_default {
+                        let mut customer_update = stripe::UpdateCustomer::new();
+                        customer_update.invoice_settings = Some(stripe::CustomerInvoiceSettings {
+                            default_payment_method: Some(pm_id.to_string()),
+                            ..Default::default()
+                        });
+                        
+                        match stripe::Customer::update(&client, &customer_id_stripe, customer_update).await {
+                            Ok(_) => println!("Set payment method {} as default for customer {}", pm.stripe_payment_method_id, customer_id),
+                            Err(e) => eprintln!("Warning: Failed to set default payment method: {}", e),
+                        }
+                    }
+                },
+                Err(e) => {
+                    eprintln!("Warning: Failed to attach payment method {}: {}", pm.stripe_payment_method_id, e);
+                }
+            }
+        } else {
+            println!("Payment method {} is already attached to a customer", pm.stripe_payment_method_id);
+        }
+    }
+    
+    Ok(format!("Fixed {} payment method attachments", fixed_count))
 }
 
 #[tauri::command]
@@ -212,13 +317,86 @@ pub async fn create_subscription(
 ) -> Result<SubscriptionResponse, String> {
     let client = get_stripe_client()?;
     
+    // First, ensure the customer has a properly attached payment method
     let customer_id_parsed: CustomerId = customer_id.clone().parse().map_err(|_| "Invalid customer ID".to_string())?;
+    
+    // Get payment methods from database for this user
+    let db_config = crate::database::get_authenticated_db(&app).await.map_err(|e| {
+        format!("Failed to get database config: {}", e)
+    })?;
+    
+    let http_client = reqwest::Client::new();
+    let response = http_client
+        .get(&format!("{}/rest/v1/payment_methods", db_config.database_url))
+        .header("Authorization", format!("Bearer {}", db_config.access_token))
+        .header("apikey", &db_config.anon_key)
+        .query(&[("user_id", format!("eq.{}", user_id))])
+        .send()
+        .await
+        .map_err(|e| format!("Database request failed: {}", e))?;
+    
+    if !response.status().is_success() {
+        return Err(format!("Database query failed: HTTP {}", response.status()));
+    }
+    
+    let payment_methods: Vec<crate::database::PaymentMethod> = response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse payment methods: {}", e))?;
+    
+    if payment_methods.is_empty() {
+        return Err("No payment methods found. Please add a payment method first.".to_string());
+    }
+    
+    // Find the default payment method or use the first one
+    let default_pm = payment_methods.iter().find(|pm| pm.is_default)
+        .or_else(|| payment_methods.first())
+        .ok_or("No payment method available")?;
+    
+    let pm_id = stripe::PaymentMethodId::from_str(&default_pm.stripe_payment_method_id).map_err(|e| {
+        format!("Invalid payment method ID {}: {}", default_pm.stripe_payment_method_id, e)
+    })?;
+    
+    // Retrieve the payment method to check if it's attached
+    let payment_method = stripe::PaymentMethod::retrieve(&client, &pm_id, &[]).await.map_err(|e| {
+        format!("Failed to retrieve payment method: {}", e)
+    })?;
+    
+    // Attach payment method to customer if not already attached
+    if payment_method.customer.is_none() {
+        stripe::PaymentMethod::attach(
+            &client,
+            &pm_id,
+            stripe::AttachPaymentMethod {
+                customer: customer_id_parsed.clone(),
+            },
+        ).await.map_err(|e| {
+            format!("Failed to attach payment method to customer: {}", e)
+        })?;
+    }
+    
+    // Set as default payment method for the customer
+    let mut customer_update = stripe::UpdateCustomer::new();
+    customer_update.invoice_settings = Some(stripe::CustomerInvoiceSettings {
+        default_payment_method: Some(pm_id.to_string()),
+        ..Default::default()
+    });
+    
+    stripe::Customer::update(&client, &customer_id_parsed, customer_update).await.map_err(|e| {
+        format!("Failed to set default payment method: {}", e)
+    })?;
+    
+    // Now create the subscription with the properly attached payment method
+    let payment_method_id_str = pm_id.to_string();
     let mut params = CreateSubscription::new(customer_id_parsed);
     params.items = Some(vec![CreateSubscriptionItems {
         price: Some(price_id.clone()),
         quantity: Some(1),
         ..Default::default()
     }]);
+    
+    // Explicitly specify the default payment method
+    params.default_payment_method = Some(&payment_method_id_str);
     
     // Add metadata to link subscription to user
     let mut metadata = HashMap::new();
@@ -248,6 +426,7 @@ pub async fn create_subscription(
         customer_id,
         status: subscription_status,
         current_period_end,
+        price_id: price_id.clone(),
     })
 }
 
@@ -293,6 +472,12 @@ pub async fn get_subscription_status(
         .await
         .map_err(|e| format!("Failed to retrieve subscription: {}", e))?;
 
+    // Extract price_id from subscription items
+    let price_id = subscription.items.data.first()
+        .and_then(|item| item.price.as_ref())
+        .map(|price| price.id.to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+
     Ok(SubscriptionResponse {
         subscription_id: subscription.id.to_string(),
         customer_id: match subscription.customer {
@@ -301,6 +486,7 @@ pub async fn get_subscription_status(
         },
         status: subscription.status.to_string(),
         current_period_end: subscription.current_period_end,
+        price_id,
     })
 }
 
@@ -332,11 +518,18 @@ pub async fn sync_subscription_status(
         app,
     ).await?;
 
+    // Extract price_id from subscription items
+    let price_id = subscription.items.data.first()
+        .and_then(|item| item.price.as_ref())
+        .map(|price| price.id.to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+
     Ok(SubscriptionResponse {
         subscription_id: subscription.id.to_string(),
         customer_id,
         status: subscription.status.to_string(),
         current_period_end: subscription.current_period_end,
+        price_id,
     })
 }
 
@@ -395,15 +588,21 @@ pub async fn get_product_with_prices(
     // Convert prices to our format
     let mut product_prices = Vec::new();
     for price in prices.data {
-        if let Some(recurring) = price.recurring {
-            product_prices.push(ProductPrice {
-                id: price.id.to_string(),
-                amount: price.unit_amount.unwrap_or(0),
-                currency: price.currency.map(|c| c.to_string()).unwrap_or_else(|| "usd".to_string()),
-                interval: recurring.interval.to_string(),
-                interval_count: recurring.interval_count as i64,
-            });
-        }
+        let (interval, interval_count) = if let Some(recurring) = price.recurring {
+            // Recurring subscription price
+            (recurring.interval.to_string(), recurring.interval_count as i64)
+        } else {
+            // One-time purchase price
+            ("one_time".to_string(), 1)
+        };
+        
+        product_prices.push(ProductPrice {
+            id: price.id.to_string(),
+            amount: price.unit_amount.unwrap_or(0),
+            currency: price.currency.map(|c| c.to_string()).unwrap_or_else(|| "usd".to_string()),
+            interval,
+            interval_count,
+        });
     }
     
     Ok(ProductWithPrices {
@@ -669,6 +868,42 @@ pub async fn store_payment_method_after_setup(
         format!("Stripe API error: {}", e)
     })?;
     
+    // Attach payment method to customer if not already attached
+    if payment_method.customer.is_none() {
+        let customer_id_stripe = stripe::CustomerId::from_str(&customer_id).map_err(|e| {
+            format!("Invalid customer ID: {}", e)
+        })?;
+        
+        stripe::PaymentMethod::attach(
+            &client,
+            &pm_id,
+            stripe::AttachPaymentMethod {
+                customer: customer_id_stripe,
+            },
+        ).await.map_err(|e| {
+            format!("Failed to attach payment method to customer: {}", e)
+        })?;
+    }
+    
+    // Set as default payment method for the customer if requested or if it's the first payment method
+    let should_set_default = is_default.unwrap_or(true); // Default to true if not specified
+    if should_set_default {
+        let customer_id_stripe = stripe::CustomerId::from_str(&customer_id).map_err(|e| {
+            format!("Invalid customer ID: {}", e)
+        })?;
+        
+        // Update customer's default payment method
+        let mut customer_update = stripe::UpdateCustomer::new();
+        customer_update.invoice_settings = Some(stripe::CustomerInvoiceSettings {
+            default_payment_method: Some(pm_id.to_string()),
+            ..Default::default()
+        });
+        
+        stripe::Customer::update(&client, &customer_id_stripe, customer_update).await.map_err(|e| {
+            format!("Failed to set default payment method: {}", e)
+        })?;
+    }
+    
     // Extract card details for storage (non-sensitive metadata only)
     let (card_brand, card_last4, card_exp_month, card_exp_year) = match &payment_method.card {
         Some(card) => {
@@ -686,7 +921,7 @@ pub async fn store_payment_method_after_setup(
     };
     
     // Store in database using the database module function
-    crate::database::store_payment_method(
+    let payment_method_result = crate::database::store_payment_method(
         user_id.clone(),
         payment_method_id.clone(),
         card_brand.clone(),
@@ -694,8 +929,45 @@ pub async fn store_payment_method_after_setup(
         card_exp_month,
         card_exp_year,
         is_default,
-        app,
-    ).await
+        app.clone(),
+    ).await?;
+    
+    // Update user profile with stripe_customer_id if not already set
+    // This ensures the user can create subscriptions
+    // We'll use a direct database update since update_user_profile doesn't support customer_id
+    let db_config = crate::database::get_authenticated_db(&app).await.map_err(|e| {
+        format!("Failed to get database config: {}", e)
+    })?;
+    
+    let client = reqwest::Client::new();
+    let mut update_data = std::collections::HashMap::new();
+    update_data.insert("stripe_customer_id", serde_json::json!(customer_id));
+    update_data.insert("updated_at", serde_json::json!(chrono::Utc::now().to_rfc3339()));
+    
+    let response = client
+        .patch(&format!("{}/rest/v1/profiles", db_config.database_url))
+        .header("Authorization", format!("Bearer {}", db_config.access_token))
+        .header("apikey", &db_config.anon_key)
+        .header("Content-Type", "application/json")
+        .header("Prefer", "return=minimal")
+        .query(&[("id", format!("eq.{}", user_id))])
+        .json(&update_data)
+        .send()
+        .await;
+    
+    match response {
+        Ok(resp) if resp.status().is_success() => {
+            // Successfully updated customer ID
+        },
+        Ok(resp) => {
+            eprintln!("Warning: Failed to update user profile with customer ID: HTTP {}", resp.status());
+        },
+        Err(e) => {
+            eprintln!("Warning: Failed to update user profile with customer ID: {}", e);
+        }
+    }
+    
+    Ok(payment_method_result)
 }
 
 /// Get user's payment methods from database (faster than Stripe API)

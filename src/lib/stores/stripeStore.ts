@@ -14,6 +14,7 @@ interface StripeState {
     customerId: string | null;
     status: string | null;
     currentPeriodEnd: number | null;
+    priceId: string | null;
   };
 }
 
@@ -27,6 +28,7 @@ interface SubscriptionResponse {
   customer_id: string;
   status: string;
   current_period_end: number;
+  price_id: string;
 }
 
 interface SubscriptionSyncResult {
@@ -47,6 +49,7 @@ class StripeStore {
       customerId: null,
       status: null,
       currentPeriodEnd: null,
+      priceId: null
     }
   });
 
@@ -142,7 +145,8 @@ class StripeStore {
           subscriptionId: subscription.subscription_id,
           customerId: subscription.customer_id,
           status: subscription.status,
-          currentPeriodEnd: subscription.current_period_end
+          currentPeriodEnd: subscription.current_period_end,
+          priceId: subscription.price_id
         },
         isLoading: false
       }));
@@ -200,7 +204,8 @@ class StripeStore {
           subscriptionId: subscription.subscription_id,
           customerId: subscription.customer_id,
           status: subscription.status,
-          currentPeriodEnd: subscription.current_period_end
+          currentPeriodEnd: subscription.current_period_end,
+          priceId: subscription.price_id
         },
         isLoading: false
       }));
@@ -230,7 +235,8 @@ class StripeStore {
           subscriptionId: subscription.subscription_id,
           customerId: subscription.customer_id,
           status: subscription.status,
-          currentPeriodEnd: subscription.current_period_end
+          currentPeriodEnd: subscription.current_period_end,
+          priceId: subscription.price_id
         },
         isLoading: false
       }));
@@ -303,6 +309,7 @@ class StripeStore {
         customerId: null,
         status: null,
         currentPeriodEnd: null,
+        priceId: null
       }
     });
   }

@@ -4,9 +4,8 @@
   import { 
     HomeIcon, 
     SettingsIcon, 
-    UserIcon, 
-    CreditCardIcon,
-    PlayIcon 
+    PlayIcon, 
+    PackagePlusIcon
   } from "lucide-svelte";
 
   interface NavItem {
@@ -28,6 +27,12 @@
       label: "Features",
       icon: PlayIcon,
       activePattern: /^\/features/
+    },
+    {
+      path: "/packages",
+      label: "Packages",
+      icon: PackagePlusIcon,
+      activePattern: /^\/packages/
     },
     {
       path: "/settings",

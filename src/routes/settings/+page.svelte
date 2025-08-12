@@ -13,6 +13,7 @@
         FileText,
         ChevronRight,
         LogOut,
+        CrownIcon,
     } from "lucide-svelte";
     import { Card, CardContent, CardHeader, CardTitle } from "$lib/components/ui/card";
     import { Button } from "$lib/components/ui/button";
@@ -22,13 +23,8 @@
     $: ({ profile, loading: isLoading, error } = $profileStore);
 
     onMount(async () => {
-        // Load profile data (will use cache if available)
-        await settingsActions.loadProfile();
-        
-        // Start background refresh after initial load
-        setTimeout(() => {
-            settingsActions.refreshProfileInBackground();
-        }, 100);
+        // Initialize all settings data with smart caching
+        await settingsActions.initialize();
     });
 
     function goBack() {
@@ -99,6 +95,19 @@
 
             <!-- Navigation Links -->
         <div class="space-y-2">
+            <!-- Subscription -->
+            <Button 
+                variant="ghost"
+                class="w-full justify-between h-auto p-4"
+                onclick={() => navigateTo('/settings/subscription')}
+            >
+                <div class="flex items-center gap-3">
+                    <CrownIcon class="w-5 h-5 text-muted-foreground" />
+                    <span class="text-foreground font-medium">Subscription</span>
+                </div>
+                <ChevronRight class="w-5 h-5 text-muted-foreground" />
+            </Button>
+
             <!-- Payment Methods -->
             <Button 
                 variant="ghost"

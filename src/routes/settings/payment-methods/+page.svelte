@@ -54,24 +54,14 @@
       if (!$authStore.user) {
         throw new Error('User not authenticated');
       }
-
-      // Store user ID for database operations
-      userId = $authStore.user.id;
-
-      // Initialize customer (this will be cached in the store)
-      await settingsActions.initializeCustomer();
       
-      // Load payment methods (will use cache if available)
-      await settingsActions.loadPaymentMethods();
+      userId = $authStore.user.id;
+      
+      // Initialize all settings data (includes payment methods and customer)
+      await settingsActions.initialize();
       
       // Initialize Stripe
       await initializeStripe();
-      
-      // Start background refresh after initial load
-      setTimeout(() => {
-        settingsActions.refreshPaymentMethodsInBackground();
-      }, 100);
-      
     } catch (err) {
       console.error('Payment methods page: Initialization failed:', err);
       error = `Failed to initialize payment system: ${err instanceof Error ? err.message : String(err)}`;
