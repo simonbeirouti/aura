@@ -5,7 +5,7 @@ use stripe::{
     Client, CreateCustomer, CreatePaymentIntent, CreateSubscription, CreatePrice, CreateProduct,
     Customer, PaymentIntent, Subscription, Price, Product, Currency, UpdateSubscription,
     CreateSubscriptionItems, CreatePriceRecurring, CreatePriceRecurringInterval,
-    CustomerId, IdOrCreate, ListCustomers,
+    CustomerId, IdOrCreate, ListCustomers, AttachPaymentMethod,
 };
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -715,7 +715,68 @@ pub async fn set_default_payment_method_integrated(
     user_id: String,
     app: tauri::AppHandle,
 ) -> Result<String, String> {
-    // Set as default in Stripe
+    let client = get_stripe_client()?;
+    
+    // First, check if the payment method is attached to the customer
+    let pm_id = stripe::PaymentMethodId::from_str(&payment_method_id)
+        .map_err(|e| format!("Invalid payment method ID: {}", e))?;
+    
+    // Try to retrieve the payment method to check its status
+    match stripe::PaymentMethod::retrieve(&client, &pm_id, &[]).await {
+        Ok(pm) => {
+            // Check if it's attached to the right customer
+            match pm.customer {
+                Some(stripe::Expandable::Id(cust_id)) => {
+                    if cust_id.to_string() != customer_id {
+                        // Payment method exists but is attached to wrong customer or not attached
+                        return Err(format!("Payment method {} is not attached to customer {}", payment_method_id, customer_id));
+                    }
+                },
+                Some(stripe::Expandable::Object(customer)) => {
+                    if customer.id.to_string() != customer_id {
+                        return Err(format!("Payment method {} is attached to wrong customer", payment_method_id));
+                    }
+                },
+                None => {
+                    // Payment method exists but is not attached to any customer
+                    // Try to attach it first
+                    let customer_id_stripe = stripe::CustomerId::from_str(&customer_id)
+                        .map_err(|e| format!("Invalid customer ID: {}", e))?;
+                    
+                    let attach_params = AttachPaymentMethod {
+                        customer: customer_id_stripe,
+                    };
+                    
+                    match stripe::PaymentMethod::attach(&client, &pm_id, attach_params).await {
+                        Ok(_) => {
+                            // Successfully attached
+                        },
+                        Err(e) => {
+                            // Check if it's a "permanently unusable" error
+                            let error_msg = e.to_string();
+                            if error_msg.contains("was previously used without being attached") || 
+                               error_msg.contains("may not be used again") {
+                                // Payment method is permanently unusable, remove from database
+                                let _ = crate::database::delete_payment_method_from_db(
+                                    payment_method_id.clone(),
+                                    user_id.clone(),
+                                    app.clone(),
+                                ).await;
+                                return Err("Payment method is no longer usable and has been removed from your account. Please add a new payment method.".to_string());
+                            } else {
+                                return Err(format!("Failed to attach payment method to customer: {}", e));
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        Err(e) => {
+            return Err(format!("Failed to retrieve payment method from Stripe: {}", e));
+        }
+    }
+    
+    // Now set as default in Stripe
     set_default_payment_method(customer_id, payment_method_id.clone()).await?;
     
     // Update in database
@@ -737,8 +798,21 @@ pub async fn delete_payment_method_integrated(
     user_id: String,
     app: tauri::AppHandle,
 ) -> Result<String, String> {
-    // Delete from Stripe first
-    delete_payment_method(payment_method_id.clone()).await?;
+    // Try to delete from Stripe first, but don't fail if it's already detached/orphaned
+    match delete_payment_method(payment_method_id.clone()).await {
+        Ok(_) => {
+            // Successfully deleted from Stripe
+        },
+        Err(e) => {
+            // Check if it's an "already detached" or "not attached" error
+            if e.contains("not attached to a customer") || e.contains("detachment is impossible") {
+                // Payment method is orphaned in Stripe, just remove from database
+            } else {
+                // Some other Stripe error, propagate it
+                return Err(e);
+            }
+        }
+    }
     
     // Soft delete from database
     crate::database::delete_payment_method_from_db(

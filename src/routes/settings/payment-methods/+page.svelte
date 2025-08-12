@@ -104,16 +104,39 @@
           clientSecret: setupIntent.client_secret
         });
         
-        // Create card elements with explicit placeholders
+        // Create card elements with explicit placeholders and proper dark/light mode styling
+        // Detect if we're in dark mode by checking the background color
+        const isDarkMode = document.documentElement.classList.contains('dark') || 
+                          window.matchMedia('(prefers-color-scheme: dark)').matches;
+        
+        // Use explicit colors that work in both modes
+        const textColor = isDarkMode ? '#ffffff' : '#000000';
+        const placeholderColor = isDarkMode ? '#9ca3af' : '#6b7280';
+        const errorColor = isDarkMode ? '#ef4444' : '#dc2626';
+        
         const elementStyle = {
           base: {
             fontSize: '16px',
-            color: 'hsl(var(--foreground))',
+            color: textColor,
             lineHeight: '1.5',
+            fontFamily: 'system-ui, -apple-system, sans-serif',
             '::placeholder': {
-              color: 'hsl(var(--muted-foreground))',
+              color: placeholderColor,
+            },
+            ':focus': {
+              color: textColor,
+            },
+            ':hover': {
+              color: textColor,
             },
           },
+          invalid: {
+            color: errorColor,
+            iconColor: errorColor,
+          },
+          complete: {
+            color: textColor,
+          }
         };
         
         cardNumberElement = elements.create('cardNumber', { 
@@ -223,17 +246,25 @@
       return;
     }
     
+    isProcessing = true;
+    error = '';
+    
     try {
+      
       // Use the integrated function that removes from both Stripe and database
       await invoke('delete_payment_method_integrated', {
         paymentMethodId,
         userId
       });
-      // Reload payment methods from database
+      
+      // Force reload payment methods from database with cache bypass
       await settingsActions.loadPaymentMethods(true);
+      
     } catch (err) {
       console.error('Failed to delete payment method:', err);
-      error = 'Failed to delete payment method';
+      error = `Failed to delete payment method: ${err instanceof Error ? err.message : String(err)}`;
+    } finally {
+      isProcessing = false;
     }
   }
 
@@ -244,18 +275,26 @@
       return;
     }
     
+    isProcessing = true;
+    error = '';
+    
     try {
+      
       // Use the integrated function that updates both Stripe and database
       await invoke('set_default_payment_method_integrated', {
         customerId,
         paymentMethodId,
         userId
       });
-      // Reload payment methods from database
+      
+      // Force reload payment methods from database with cache bypass
       await settingsActions.loadPaymentMethods(true);
+      
     } catch (err) {
       console.error('Failed to set default payment method:', err);
-      error = 'Failed to set default payment method';
+      error = `Failed to set default payment method: ${err instanceof Error ? err.message : String(err)}`;
+    } finally {
+      isProcessing = false;
     }
   }
 
@@ -364,17 +403,17 @@
             <div class="space-y-4">
               <div class="space-y-2">
                 <Label for="card-number">Card Number</Label>
-                <div id="card-number" class="p-3 border border-border rounded-lg" bind:this={cardContainer}></div>
+                <div id="card-number" class="p-3 border border-border rounded-lg bg-background text-foreground focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2" bind:this={cardContainer}></div>
               </div>
               
               <div class="grid grid-cols-2 gap-4">
                 <div class="space-y-2">
                   <Label for="card-expiry">Expiry Date</Label>
-                  <div id="card-expiry" class="p-3 border border-border rounded-lg" bind:this={expiryContainer}></div>
+                  <div id="card-expiry" class="p-3 border border-border rounded-lg bg-background text-foreground focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2" bind:this={expiryContainer}></div>
                 </div>
                 <div class="space-y-2">
                   <Label for="card-cvc">CVC</Label>
-                  <div id="card-cvc" class="p-3 border border-border rounded-lg" bind:this={cvcContainer}></div>
+                  <div id="card-cvc" class="p-3 border border-border rounded-lg bg-background text-foreground focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2" bind:this={cvcContainer}></div>
                 </div>
               </div>
             </div>
@@ -421,28 +460,36 @@
             {#if selectedPaymentMethod && !selectedPaymentMethod.is_default}
               <Button 
                 onclick={() => {
-                  if (selectedPaymentMethod) {
+                  if (selectedPaymentMethod && !isProcessing) {
                     setDefaultPaymentMethod(selectedPaymentMethod.stripe_payment_method_id);
                     isEditDrawerOpen = false;
                   }
                 }}
                 class="w-full justify-start"
                 variant="ghost"
+                disabled={isProcessing}
               >
+                {#if isProcessing}
+                  <div class="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin mr-2"></div>
+                {/if}
                 Set Default
               </Button>
             {/if}
             
             <Button 
               onclick={() => {
-                if (selectedPaymentMethod) {
+                if (selectedPaymentMethod && !isProcessing) {
                   deletePaymentMethod(selectedPaymentMethod.stripe_payment_method_id);
                   isEditDrawerOpen = false;
                 }
               }}
               class="w-full justify-start text-destructive hover:text-destructive hover:bg-destructive/10"
               variant="ghost"
+              disabled={isProcessing}
             >
+              {#if isProcessing}
+                <div class="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin mr-2"></div>
+              {/if}
               Remove
             </Button>
           </div>

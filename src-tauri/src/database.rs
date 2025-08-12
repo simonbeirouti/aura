@@ -453,6 +453,10 @@ pub async fn store_payment_method(
     
     let client = reqwest::Client::new();
     
+    // Check if this is the user's first payment method
+    let existing_methods = get_user_payment_methods(user_id.clone(), app.clone()).await?;
+    let should_be_default = is_default.unwrap_or(false) || existing_methods.is_empty();
+    
     let url = format!("{}/rest/v1/payment_methods", db_config.database_url);
     
     let payload = serde_json::json!({
@@ -462,12 +466,12 @@ pub async fn store_payment_method(
         "card_last4": card_last4,
         "card_exp_month": card_exp_month,
         "card_exp_year": card_exp_year,
-        "is_default": is_default.unwrap_or(false),
+        "is_default": should_be_default,
         "is_active": true
     });
     
     // If this is set as default, first unset all other defaults for this user
-    if is_default.unwrap_or(false) {
+    if should_be_default {
         let _ = unset_all_default_payment_methods(user_id.clone(), app.clone()).await;
     }
     
@@ -515,7 +519,6 @@ pub async fn get_user_payment_methods(
         .header("apikey", &db_config.anon_key)
         .query(&[
             ("user_id", format!("eq.{}", user_id)),
-            ("is_active", "eq.true".to_string()),
             ("order", "is_default.desc,created_at.desc".to_string())
         ])
         .send()
@@ -570,7 +573,7 @@ pub async fn update_payment_method(
         .header("Content-Type", "application/json")
         .header("Prefer", "return=representation")
         .query(&[
-            ("id", format!("eq.{}", payment_method_id)),
+            ("stripe_payment_method_id", format!("eq.{}", payment_method_id)),
             ("user_id", format!("eq.{}", user_id))
         ])
         .json(&payload)
@@ -594,7 +597,31 @@ pub async fn update_payment_method(
         .ok_or_else(|| "No payment method returned from database".to_string())
 }
 
-/// Delete payment method (soft delete by setting is_active to false)
+/// Ensure that if there's only one payment method, it's set as default
+async fn ensure_single_payment_method_is_default(
+    user_id: String,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
+    let payment_methods = get_user_payment_methods(user_id.clone(), app.clone()).await?;
+    
+    // If there's exactly one payment method and it's not default, make it default
+    if payment_methods.len() == 1 {
+        let pm = &payment_methods[0];
+        if !pm.is_default {
+            let _ = update_payment_method(
+                pm.stripe_payment_method_id.clone(),
+                user_id,
+                Some(true), // is_default
+                None,       // is_active (don't change)
+                app,
+            ).await;
+        }
+    }
+    
+    Ok(())
+}
+
+/// Delete payment method (hard delete from database)
 #[command]
 pub async fn delete_payment_method_from_db(
     payment_method_id: String,
@@ -606,21 +633,15 @@ pub async fn delete_payment_method_from_db(
     
     let url = format!("{}/rest/v1/payment_methods", db_config.database_url);
     
-    let payload = serde_json::json!({
-        "is_active": false,
-        "updated_at": chrono::Utc::now().to_rfc3339()
-    });
-    
     let response = client
-        .patch(&url)
+        .delete(&url)
         .header("Authorization", format!("Bearer {}", db_config.access_token))
         .header("apikey", &db_config.anon_key)
         .header("Content-Type", "application/json")
         .query(&[
-            ("id", format!("eq.{}", payment_method_id)),
+            ("stripe_payment_method_id", format!("eq.{}", payment_method_id)),
             ("user_id", format!("eq.{}", user_id))
         ])
-        .json(&payload)
         .send()
         .await
         .map_err(|e| format!("Failed to delete payment method: {}", e))?;
@@ -629,6 +650,9 @@ pub async fn delete_payment_method_from_db(
         let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
         return Err(format!("Database error deleting payment method: {}", error_text));
     }
+    
+    // After deletion, ensure remaining payment method (if any) is set as default
+    let _ = ensure_single_payment_method_is_default(user_id, app).await;
     
     Ok("Payment method deleted successfully".to_string())
 }
@@ -656,7 +680,7 @@ pub async fn mark_payment_method_used(
         .header("apikey", &db_config.anon_key)
         .header("Content-Type", "application/json")
         .query(&[
-            ("id", format!("eq.{}", payment_method_id)),
+            ("stripe_payment_method_id", format!("eq.{}", payment_method_id)),
             ("user_id", format!("eq.{}", user_id))
         ])
         .json(&payload)
@@ -687,19 +711,25 @@ async fn unset_all_default_payment_methods(
         "updated_at": chrono::Utc::now().to_rfc3339()
     });
     
-    let _response = client
+    let response = client
         .patch(&url)
         .header("Authorization", format!("Bearer {}", db_config.access_token))
         .header("apikey", &db_config.anon_key)
         .header("Content-Type", "application/json")
         .query(&[
             ("user_id", format!("eq.{}", user_id)),
-            ("is_default", "eq.true".to_string())
+            ("is_default", "eq.true".to_string()),
+            ("is_active", "eq.true".to_string())
         ])
         .json(&payload)
         .send()
         .await
         .map_err(|e| format!("Failed to unset default payment methods: {}", e))?;
+    
+    if !response.status().is_success() {
+        let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+        return Err(format!("Database error unsetting default payment methods: {}", error_text));
+    }
     
     Ok(())
 }
