@@ -2,7 +2,6 @@ import { writable, derived } from 'svelte/store';
 import { invoke } from '@tauri-apps/api/core';
 import { authStore } from './supabaseAuth';
 import { stripeStore } from './stripeStore';
-import { migrationStore } from './migrationStore';
 import { dataActions } from './dataStore';
 
 interface AuthState {
@@ -12,14 +11,12 @@ interface AuthState {
   profile: any | null;
   isLoading: boolean;
   error: string | null;
-  migrationStatus: 'pending' | 'running' | 'complete' | 'error' | null;
   stripeInitialized: boolean;
 }
 
 interface InitializationResult {
   authReady: boolean;
   profileReady: boolean;
-  migrationsComplete: boolean;
   stripeReady: boolean;
   errors: string[];
 }
@@ -32,7 +29,6 @@ class CentralizedAuthStore {
     profile: null,
     isLoading: true,
     error: null,
-    migrationStatus: null,
     stripeInitialized: false
   });
 
@@ -107,22 +103,22 @@ class CentralizedAuthStore {
   // Derived stores for common checks
   readonly isReady = derived(
     this.store,
-    $state => $state.isInitialized && !$state.isLoading && $state.migrationStatus === 'complete'
+    $state => $state.isInitialized && !$state.isLoading
   );
 
   readonly shouldShowApp = derived(
     this.store,
-    $state => $state.isAuthenticated && $state.profile && $state.migrationStatus === 'complete'
+    $state => $state.isAuthenticated && $state.profile
   );
 
   readonly shouldShowOnboarding = derived(
     this.store,
-    $state => $state.isAuthenticated && (!$state.profile || !$state.profile.onboarding_complete) && $state.migrationStatus === 'complete'
+    $state => $state.isAuthenticated && (!$state.profile || !$state.profile.onboarding_complete)
   );
 
   readonly shouldShowLogin = derived(
     this.store,
-    $state => !$state.isAuthenticated && $state.migrationStatus === 'complete'
+    $state => !$state.isAuthenticated
   );
 
   /**
@@ -133,32 +129,17 @@ class CentralizedAuthStore {
       ...state, 
       isLoading: true, 
       error: null,
-      migrationStatus: 'pending'
     }));
 
     const result: InitializationResult = {
       authReady: false,
       profileReady: false,
-      migrationsComplete: false,
       stripeReady: false,
       errors: []
     };
 
     try {
-      // Step 1: Run database migrations first
-      this.store.update(state => ({ ...state, migrationStatus: 'running' }));
-      
-      const migrationSuccess = await migrationStore.checkAndRunMigrations(true);
-      if (!migrationSuccess) {
-        result.errors.push('Database migrations failed');
-        this.store.update(state => ({ ...state, migrationStatus: 'error' }));
-        return result;
-      }
-      
-      result.migrationsComplete = true;
-      this.store.update(state => ({ ...state, migrationStatus: 'complete' }));
-
-      // Step 2: Robust cache → backend → login flow
+      // Step 1: Robust cache → backend → login flow
       let authState: { isAuthenticated: boolean; user: any | null } = { isAuthenticated: false, user: null };
       
       try {
@@ -185,7 +166,7 @@ class CentralizedAuthStore {
         result.errors.push(`Authentication failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
       }
 
-      // Step 3: If authenticated, load user profile and initialize Stripe
+      // Step 2: If authenticated, load user profile and initialize Stripe
       if (authState.isAuthenticated && authState.user && authState.user.id) {
         this.store.update(state => ({ 
           ...state, 

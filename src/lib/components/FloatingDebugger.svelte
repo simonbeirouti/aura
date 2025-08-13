@@ -3,7 +3,6 @@
   import { centralizedAuth } from '../stores/unifiedAuth';
   import { settingsStore } from '../stores/settingsStore';
   import { stripeStore, stripeUtils, stripeReady, stripeCustomer, stripeEnvironment } from '../stores/stripeStore';
-  import { migrationStore } from '../stores/migrationStore';
   import { sessionStore } from '../stores/sessionStore';
   import { cacheManager, cacheStats } from '../stores/cacheManager';
   import { storeCoordinator, coordinatorStats } from '../stores/storeCoordinator';
@@ -23,7 +22,6 @@
   let stripeReadyState: any = {};
   let stripeCustomerState: any = {};
   let stripeEnvironmentState: any = {};
-  let migrationState: any = {};
   let sessionState: any = {};
   let cacheState: any = {};
   let coordinatorState: any = {};
@@ -54,7 +52,6 @@
       stripeReady.subscribe(state => stripeReadyState = state),
       stripeCustomer.subscribe(state => stripeCustomerState = state),
       stripeEnvironment.subscribe(state => stripeEnvironmentState = state),
-      migrationStore.subscribe(state => migrationState = state),
       sessionStore.subscribe(state => sessionState = state),
       cacheStats.subscribe(state => cacheState = state),
       coordinatorStats.subscribe(state => coordinatorState = state)
@@ -335,7 +332,6 @@
         { id: 'auth', label: 'Auth', color: getStatusColor(authState.isAuthenticated) },
         { id: 'stripe', label: 'Stripe', color: getStatusColor(stripeReadyState) },
         { id: 'stores', label: 'Stores', color: getStatusColor(settingsState.isInitialized) },
-        { id: 'migration', label: 'Migration', color: getStatusColor(migrationState.status) },
         { id: 'cache', label: 'Cache', color: getStatusColor(cacheState.size > 0) },
         { id: 'database', label: 'Database', color: 'bg-blue-500' }
       ] as tab}
@@ -463,25 +459,6 @@
             <h4 class="font-semibold text-sm">Coordinator Stats:</h4>
             <pre class="text-xs bg-gray-100 dark:bg-gray-800 p-2 rounded overflow-auto max-h-24">
 {formatJson(coordinatorState)}
-            </pre>
-          </div>
-        </div>
-
-      {:else if activeTab === 'migration'}
-        <div class="space-y-3">
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-4">
-            <Badge variant={migrationState.status === 'complete' ? 'default' : 'secondary'}>
-              Status: {migrationState.status || 'unknown'}
-            </Badge>
-            <Badge variant={migrationState.isLoading ? 'secondary' : 'default'}>
-              Loading: {migrationState.isLoading}
-            </Badge>
-          </div>
-
-          <div class="space-y-2">
-            <h4 class="font-semibold text-sm">Migration State:</h4>
-            <pre class="text-xs bg-gray-100 dark:bg-gray-800 p-2 rounded overflow-auto max-h-32">
-{formatJson(migrationState)}
             </pre>
           </div>
         </div>

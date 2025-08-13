@@ -5,7 +5,6 @@ import { sessionStore, sessionActions } from './sessionStore';
 import { storeManager } from './core/storeManager';
 import { loadingActions } from './loadingStore';
 import { stripeStore, stripeUtils } from './stripeStore';
-import { migrationStore } from './migrationStore';
 import { dataActions } from './dataStore';
 
 // Supabase client setup with better error handling
@@ -66,7 +65,6 @@ interface UnifiedAuthState {
   profileLoaded: boolean;
   
   // System status
-  migrationStatus: 'pending' | 'running' | 'complete' | 'error' | null;
   stripeInitialized: boolean;
   
   // Session management
@@ -78,7 +76,6 @@ interface UnifiedAuthState {
 export interface InitializationResult {
   authReady: boolean;
   profileReady: boolean;
-  migrationsComplete: boolean;
   stripeReady: boolean;
   errors: string[];
 }
@@ -93,7 +90,6 @@ const initialState: UnifiedAuthState = {
   error: null,
   profile: null,
   profileLoaded: false,
-  migrationStatus: null,
   stripeInitialized: false,
   lastActivity: null,
   tokenExpiresAt: null
@@ -110,22 +106,22 @@ class UnifiedAuthStore {
   // Derived states for UI logic
   readonly isReady = derived(
     this.store,
-    $state => $state.isInitialized && !$state.isLoading && $state.migrationStatus === 'complete'
+    $state => $state.isInitialized && !$state.isLoading
   );
 
   readonly shouldShowApp = derived(
     this.store,
-    $state => $state.isAuthenticated && $state.profile && $state.profile.onboarding_complete && $state.migrationStatus === 'complete'
+    $state => $state.isAuthenticated && $state.profile && $state.profile.onboarding_complete
   );
 
   readonly shouldShowOnboarding = derived(
     this.store,
-    $state => $state.isAuthenticated && $state.profileLoaded && (!$state.profile || !$state.profile.onboarding_complete) && $state.migrationStatus === 'complete'
+    $state => $state.isAuthenticated && $state.profileLoaded && (!$state.profile || !$state.profile.onboarding_complete)
   );
 
   readonly shouldShowLogin = derived(
     this.store,
-    $state => !$state.isAuthenticated && $state.migrationStatus === 'complete' && $state.isInitialized
+    $state => !$state.isAuthenticated && $state.isInitialized
   );
 
   /**
@@ -138,13 +134,11 @@ class UnifiedAuthStore {
       ...state, 
       isLoading: true, 
       error: null,
-      migrationStatus: 'pending'
     }));
 
     const result: InitializationResult = {
       authReady: false,
       profileReady: false,
-      migrationsComplete: false,
       stripeReady: false,
       errors: []
     };
@@ -154,48 +148,7 @@ class UnifiedAuthStore {
       await storeManager.initialize();
       console.log('✅ Store manager initialized');
 
-      // Step 2: Run database migrations (with fallback for missing configuration)
-      console.log('🔄 Running database migrations...');
-      this.store.update(state => ({ ...state, migrationStatus: 'running' }));
-      
-      try {
-        const migrationSuccess = await migrationStore.checkAndRunMigrations(true);
-        if (!migrationSuccess) {
-          console.warn('⚠️ Database migrations reported failure, but continuing...');
-          // Don't fail completely - might be due to missing env vars on mobile
-          // Only show error on desktop platforms
-          const isMobile = /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-          if (!isMobile) {
-            result.errors.push('Database migrations reported issues');
-          }
-        }
-        result.migrationsComplete = true;
-        this.store.update(state => ({ ...state, migrationStatus: 'complete' }));
-        console.log('✅ Database migrations check complete');
-      } catch (migrationError) {
-        console.warn('⚠️ Migration check failed:', migrationError);
-        // On mobile, missing database config is expected during development
-        const errorMessage = migrationError instanceof Error ? migrationError.message : String(migrationError);
-        if (errorMessage.includes('Supabase') || errorMessage.includes('environment variable')) {
-          console.warn('Migration failure appears to be due to missing configuration - continuing with limited functionality');
-          result.migrationsComplete = true; // Allow app to continue
-          this.store.update(state => ({ ...state, migrationStatus: 'complete' }));
-        } else {
-          // Only show error on desktop platforms
-          const isMobile = /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-          if (!isMobile) {
-            result.errors.push('Database migrations failed');
-            this.store.update(state => ({ ...state, migrationStatus: 'error' }));
-            return result;
-          } else {
-            // On mobile, allow app to continue even with migration failures
-            result.migrationsComplete = true;
-            this.store.update(state => ({ ...state, migrationStatus: 'complete' }));
-          }
-        }
-      }
-
-      // Step 3: Initialize authentication
+      // Step 2: Initialize authentication
       console.log('🔄 Initializing authentication...');
       const authSuccess = await this.initializeAuth();
       result.authReady = authSuccess;

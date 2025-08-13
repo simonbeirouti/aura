@@ -6,8 +6,6 @@ mod database;
 mod enhanced_store;
 // Stripe payment processing module
 mod stripe;
-// Migration management module
-mod migrations;
 
 // Import required for environment variable loading
 use dotenv;
@@ -133,10 +131,6 @@ pub fn run() {
             database::get_subscription_plans_with_prices,
             database::get_packages_with_prices,
             database::get_user_purchases,
-            // Migration management commands
-            migrations::get_migration_status,
-            migrations::run_migrations,
-            migrations::reset_migration_state,
             // Payment method database commands
             database::store_payment_method,
             database::get_user_payment_methods,
