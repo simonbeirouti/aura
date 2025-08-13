@@ -286,8 +286,7 @@ DELETE FROM subscription_prices;
 DELETE FROM subscription_plans;
 
 INSERT INTO subscription_plans (name, description, stripe_product_id, features, is_active, sort_order) VALUES
-    ('Monthly Subscription', 'Monthly plan for $10', 'prod_Spk57CLc5GXpg1', '["Feature 1", "Feature 2"]'::jsonb, true, 1),
-    ('Yearly Subscription', 'Yearly plan for $100', 'prod_Spk57CLc5GXpg1', '["All monthly features", "Extra savings"]'::jsonb, true, 2) -- Note: Same product ID for multiple prices
+    ('Premium Subscription', 'Premium plan with monthly and yearly pricing options', 'prod_Spk57CLc5GXpg1', '["Feature 1", "Feature 2", "Priority support", "Advanced analytics"]'::jsonb, true, 1)
 ON CONFLICT (stripe_product_id) DO NOTHING;
 
 INSERT INTO subscription_prices (subscription_plan_id, stripe_price_id, amount_cents, currency, interval_type, interval_count, token_amount, trial_period_days, is_active)

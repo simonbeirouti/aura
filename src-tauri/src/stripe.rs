@@ -22,12 +22,7 @@ use stripe::{
     CustomerId, IdOrCreate, ListCustomers, AttachPaymentMethod,
 };
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct StripeConfig {
-    pub secret_key: String,
-    pub publishable_key: String,
-    pub price_id: String, // For the subscription price
-}
+
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PaymentIntentResponse {
@@ -92,7 +87,6 @@ fn get_env_var(var_name: &str) -> Result<String, String> {
     let compile_time_value = match var_name {
         "STRIPE_SECRET_KEY" => env!("STRIPE_SECRET_KEY"),
         "STRIPE_PUBLISHABLE_KEY" => env!("STRIPE_PUBLISHABLE_KEY"),
-        "STRIPE_PRODUCT_ID" => env!("STRIPE_PRODUCT_ID"),
         _ => "",
     };
     
@@ -123,19 +117,7 @@ fn get_env_var(var_name: &str) -> Result<String, String> {
     Err(format!("{} environment variable not set", var_name))
 }
 
-// Get Stripe configuration from environment variables with cross-platform support
-#[allow(dead_code)]
-fn get_stripe_config() -> Result<StripeConfig, String> {
-    let secret_key = get_env_var("STRIPE_SECRET_KEY")?;
-    let publishable_key = get_env_var("STRIPE_PUBLISHABLE_KEY")?;
-    let price_id = get_env_var("STRIPE_PRODUCT_ID")?;
 
-    Ok(StripeConfig {
-        secret_key,
-        publishable_key,
-        price_id,
-    })
-}
 
 // Get only publishable key for payment method operations (doesn't require product ID)
 fn get_stripe_publishable_key_only() -> Result<String, String> {
@@ -357,22 +339,44 @@ pub async fn get_or_create_customer(
 
 #[tauri::command]
 pub async fn create_subscription(
-    customer_id: String,
-    price_id: String,
     user_id: String,
+    price_id: String,
     app: tauri::AppHandle,
 ) -> Result<SubscriptionResponse, String> {
     let client = get_stripe_client()?;
     
-    // First, ensure the customer has a properly attached payment method
-    let customer_id_parsed: CustomerId = customer_id.clone().parse().map_err(|_| "Invalid customer ID".to_string())?;
-    
-    // Get payment methods from database for this user
+    // Get customer ID from user profile
     let db_config = crate::database::get_authenticated_db(&app).await.map_err(|e| {
         format!("Failed to get database config: {}", e)
     })?;
     
     let http_client = reqwest::Client::new();
+    let profile_response = http_client
+        .get(&format!("{}/rest/v1/profiles", db_config.database_url))
+        .header("Authorization", format!("Bearer {}", db_config.access_token))
+        .header("apikey", &db_config.anon_key)
+        .query(&[("id", format!("eq.{}", user_id))])
+        .send()
+        .await
+        .map_err(|e| format!("Failed to fetch user profile: {}", e))?;
+    
+    if !profile_response.status().is_success() {
+        return Err(format!("Failed to fetch user profile: HTTP {}", profile_response.status()));
+    }
+    
+    let profiles: Vec<crate::database::Profile> = profile_response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse user profile: {}", e))?;
+    
+    let profile = profiles.first().ok_or("User profile not found")?;
+    let customer_id = profile.stripe_customer_id.as_ref()
+        .ok_or("User does not have a Stripe customer ID. Please add a payment method first.")?;
+    
+    // First, ensure the customer has a properly attached payment method
+    let customer_id_parsed: CustomerId = customer_id.clone().parse().map_err(|_| "Invalid customer ID".to_string())?;
+    
+    // Get payment methods from database for this user (reuse db_config from above)
     let response = http_client
         .get(&format!("{}/rest/v1/payment_methods", db_config.database_url))
         .header("Authorization", format!("Bearer {}", db_config.access_token))
@@ -470,7 +474,7 @@ pub async fn create_subscription(
 
     Ok(SubscriptionResponse {
         subscription_id: subscription.id.to_string(),
-        customer_id,
+        customer_id: customer_id.clone(),
         status: subscription_status,
         current_period_end,
         price_id: price_id.clone(),
@@ -970,6 +974,7 @@ pub async fn store_payment_method_after_setup(
     // Store in database using the database module function
     let payment_method_result = crate::database::store_payment_method(
         user_id.clone(),
+        customer_id.clone(),
         payment_method_id.clone(),
         card_brand.clone(),
         card_last4.clone(),
@@ -1242,7 +1247,7 @@ pub async fn record_purchase(
     println!("[Purchase] Found Stripe product ID: {}", stripe_product_id);
     
     // Look up the package by stripe_product_id
-    let package_query_url = format!("{}/rest/v1/packages?select=id,name,stripe_product_id,token_amount,bonus_percentage,effective_token_amount&stripe_product_id=eq.{}", 
+    let package_query_url = format!("{}/rest/v1/packages?select=id,name,stripe_product_id&stripe_product_id=eq.{}", 
         db_config.database_url, stripe_product_id);
     
     println!("[Purchase] Package query URL: {}", package_query_url);
@@ -1335,7 +1340,7 @@ pub async fn record_purchase(
     };
     
     // Look up or create the package_price record
-    let package_price_query_url = format!("{}/rest/v1/package_prices?select=id&stripe_price_id=eq.{}", 
+    let package_price_query_url = format!("{}/rest/v1/package_prices?select=id,token_amount&stripe_price_id=eq.{}", 
         db_config.database_url, stripe_price_id);
     
     let package_price_response = http_client
@@ -1350,22 +1355,25 @@ pub async fn record_purchase(
     let package_price_data: serde_json::Value = serde_json::from_str(&package_price_text).map_err(|e| format!("Failed to parse package price response: {}", e))?;
     let package_price_array = package_price_data.as_array().ok_or("Package price response is not an array")?;
     
-    // For now, just proceed without package_price_id if it doesn't exist
-    // The database trigger will handle token calculation based on amount_paid
-    let package_price_id = if !package_price_array.is_empty() {
-        Some(package_price_array[0]["id"].as_str().ok_or("Missing package price id")?.to_string())
+    // Get package_price_id and token_amount from the database
+    let (package_price_id, token_amount) = if !package_price_array.is_empty() {
+        let price_record = &package_price_array[0];
+        let price_id = price_record["id"].as_str().ok_or("Missing package price id")?.to_string();
+        let tokens = price_record["token_amount"].as_i64().unwrap_or_else(|| {
+            println!("[Purchase] Warning: No token_amount in package_price, falling back to calculated amount");
+            get_token_amount_from_price(amount_paid)
+        });
+        (Some(price_id), tokens)
     } else {
-        println!("[Purchase] No package_price found for {}, proceeding without it", stripe_price_id);
-        None
+        println!("[Purchase] No package_price found for {}, using calculated token amount", stripe_price_id);
+        (None, get_token_amount_from_price(amount_paid))
     };
     
     println!("[Purchase] Found package info:");
     println!("[Purchase]   package_id: {}", package_id);
     println!("[Purchase]   package_price_id: {:?}", package_price_id);
     println!("[Purchase]   stripe_product_id: {}", stripe_product_id);
-    
-    // Calculate token amount for this purchase
-    let token_amount = get_token_amount_from_price(amount_paid);
+    println!("[Purchase]   token_amount: {}", token_amount);
     
     // Create the purchase record with all required fields
     let mut purchase_data = serde_json::json!({

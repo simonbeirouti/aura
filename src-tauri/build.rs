@@ -12,17 +12,8 @@ fn main() {
         println!("cargo:warning=STRIPE_PUBLISHABLE_KEY not found, using empty default");
         String::new()
     });
-    let stripe_product = std::env::var("STRIPE_PRODUCT_ID").unwrap_or_else(|_| {
-        println!("cargo:warning=STRIPE_PRODUCT_ID not found, using empty default");
-        String::new()
-    });
-    
-    // Also try VITE_ prefixed versions for frontend compatibility
-    let vite_stripe_product = std::env::var("VITE_STRIPE_PRODUCT_ID").unwrap_or_else(|_| stripe_product.clone());
-    
     println!("cargo:rustc-env=STRIPE_SECRET_KEY={}", stripe_secret);
     println!("cargo:rustc-env=STRIPE_PUBLISHABLE_KEY={}", stripe_publishable);
-    println!("cargo:rustc-env=STRIPE_PRODUCT_ID={}", if !vite_stripe_product.is_empty() { vite_stripe_product } else { stripe_product });
     
     // Print build info
     if !stripe_secret.is_empty() && !stripe_publishable.is_empty() {

@@ -61,7 +61,6 @@ fn validate_stripe_environment() {
     let required_vars = [
         "STRIPE_SECRET_KEY",
         "STRIPE_PUBLISHABLE_KEY",
-        "VITE_STRIPE_PRODUCT_ID",
     ];
     
     let mut missing_vars = Vec::new();
@@ -76,10 +75,6 @@ fn validate_stripe_environment() {
             },
             "STRIPE_PUBLISHABLE_KEY" => {
                 let val = env!("STRIPE_PUBLISHABLE_KEY");
-                if val.is_empty() { None } else { Some(val.to_string()) }
-            },
-            "VITE_STRIPE_PRODUCT_ID" => {
-                let val = env!("STRIPE_PRODUCT_ID");
                 if val.is_empty() { None } else { Some(val.to_string()) }
             },
             _ => None,
@@ -135,6 +130,8 @@ pub fn run() {
             database::check_username_availability,
             database::get_database_status,
             database::update_subscription_status,
+            database::get_subscription_plans_with_prices,
+            database::get_packages_with_prices,
             // Migration management commands
             migrations::get_migration_status,
             migrations::run_migrations,

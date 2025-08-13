@@ -36,6 +36,7 @@ pub struct DatabaseConfig {
 pub struct PaymentMethod {
     pub id: String,
     pub user_id: String,
+    pub stripe_customer_id: String,
     pub stripe_payment_method_id: String,
     pub card_brand: String,
     pub card_last4: String,
@@ -66,6 +67,75 @@ pub struct UpdatePaymentMethodRequest {
     pub user_id: String,
     pub is_default: Option<bool>,
     pub is_active: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SubscriptionPlan {
+    pub id: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub stripe_product_id: String,
+    pub features: Option<serde_json::Value>,
+    pub is_active: bool,
+    pub sort_order: i32,
+    pub created_at: Option<String>,
+    pub updated_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SubscriptionPrice {
+    pub id: String,
+    pub subscription_plan_id: String,
+    pub stripe_price_id: String,
+    pub amount_cents: i64,
+    pub currency: String,
+    pub interval_type: String,
+    pub interval_count: i32,
+    pub token_amount: i64,
+    pub trial_period_days: i32,
+    pub is_active: bool,
+    pub created_at: Option<String>,
+    pub updated_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SubscriptionPlanWithPrices {
+    pub plan: SubscriptionPlan,
+    pub prices: Vec<SubscriptionPrice>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Package {
+    pub id: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub stripe_product_id: String,
+    pub features: Option<serde_json::Value>,
+    pub is_active: bool,
+    pub sort_order: i32,
+    pub created_at: Option<String>,
+    pub updated_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PackagePrice {
+    pub id: String,
+    pub package_id: String,
+    pub stripe_price_id: String,
+    pub amount_cents: i64,
+    pub currency: String,
+    pub interval_type: String,
+    pub interval_count: i32,
+    pub token_amount: i64,
+    pub is_active: bool,
+    pub created_at: Option<String>,
+    pub updated_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PackageWithPrices {
+    pub package: Package,
+    pub prices: Vec<PackagePrice>,
 }
 
 /// Initialize database connection with authentication
@@ -448,6 +518,7 @@ pub async fn update_subscription_status(
 #[command]
 pub async fn store_payment_method(
     user_id: String,
+    stripe_customer_id: String,
     stripe_payment_method_id: String,
     card_brand: String,
     card_last4: String,
@@ -469,6 +540,7 @@ pub async fn store_payment_method(
     
     let payload = serde_json::json!({
         "user_id": user_id,
+        "stripe_customer_id": stripe_customer_id,
         "stripe_payment_method_id": stripe_payment_method_id,
         "card_brand": card_brand,
         "card_last4": card_last4,
@@ -740,4 +812,136 @@ async fn unset_all_default_payment_methods(
     }
     
     Ok(())
+}
+
+/// Get subscription plans with their associated prices from the database
+#[command]
+pub async fn get_subscription_plans_with_prices(
+    app: tauri::AppHandle,
+) -> Result<Vec<SubscriptionPlanWithPrices>, String> {
+    let db_config = get_authenticated_db(&app).await?;
+    let client = reqwest::Client::new();
+    
+    // Query subscription plans
+    let plans_response = client
+        .get(&format!("{}/rest/v1/subscription_plans?is_active=eq.true&order=sort_order", db_config.database_url))
+        .header("Authorization", format!("Bearer {}", db_config.access_token))
+        .header("apikey", &db_config.anon_key)
+        .header("Content-Type", "application/json")
+        .send()
+        .await
+        .map_err(|e| format!("Failed to query subscription plans: {}", e))?;
+    
+    if !plans_response.status().is_success() {
+        let error_text = plans_response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+        return Err(format!("Database error fetching subscription plans: {}", error_text));
+    }
+    
+    let plans: Vec<SubscriptionPlan> = plans_response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse subscription plans response: {}", e))?;
+    
+    // Query subscription prices
+    let prices_response = client
+        .get(&format!("{}/rest/v1/subscription_prices?is_active=eq.true", db_config.database_url))
+        .header("Authorization", format!("Bearer {}", db_config.access_token))
+        .header("apikey", &db_config.anon_key)
+        .header("Content-Type", "application/json")
+        .send()
+        .await
+        .map_err(|e| format!("Failed to query subscription prices: {}", e))?;
+    
+    if !prices_response.status().is_success() {
+        let error_text = prices_response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+        return Err(format!("Database error fetching subscription prices: {}", error_text));
+    }
+    
+    let prices: Vec<SubscriptionPrice> = prices_response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse subscription prices response: {}", e))?;
+    
+    // Combine plans with their prices
+    let mut result = Vec::new();
+    for plan in plans {
+        let plan_prices: Vec<SubscriptionPrice> = prices
+            .iter()
+            .filter(|price| price.subscription_plan_id == plan.id)
+            .cloned()
+            .collect();
+        
+        result.push(SubscriptionPlanWithPrices {
+            plan,
+            prices: plan_prices,
+        });
+    }
+    
+    Ok(result)
+}
+
+/// Get packages with their associated prices from the database
+#[command]
+pub async fn get_packages_with_prices(
+    app: tauri::AppHandle,
+) -> Result<Vec<PackageWithPrices>, String> {
+    let db_config = get_authenticated_db(&app).await?;
+    let client = reqwest::Client::new();
+    
+    // Query packages
+    let packages_response = client
+        .get(&format!("{}/rest/v1/packages?is_active=eq.true&order=sort_order", db_config.database_url))
+        .header("Authorization", format!("Bearer {}", db_config.access_token))
+        .header("apikey", &db_config.anon_key)
+        .header("Content-Type", "application/json")
+        .send()
+        .await
+        .map_err(|e| format!("Failed to query packages: {}", e))?;
+    
+    if !packages_response.status().is_success() {
+        let error_text = packages_response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+        return Err(format!("Database error fetching packages: {}", error_text));
+    }
+    
+    let packages: Vec<Package> = packages_response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse packages response: {}", e))?;
+    
+    // Query package prices
+    let prices_response = client
+        .get(&format!("{}/rest/v1/package_prices?is_active=eq.true&order=amount_cents.asc", db_config.database_url))
+        .header("Authorization", format!("Bearer {}", db_config.access_token))
+        .header("apikey", &db_config.anon_key)
+        .header("Content-Type", "application/json")
+        .send()
+        .await
+        .map_err(|e| format!("Failed to query package prices: {}", e))?;
+    
+    if !prices_response.status().is_success() {
+        let error_text = prices_response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+        return Err(format!("Database error fetching package prices: {}", error_text));
+    }
+    
+    let prices: Vec<PackagePrice> = prices_response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse package prices response: {}", e))?;
+    
+    // Group prices by package
+    let mut packages_with_prices = Vec::new();
+    for package in packages {
+        let package_prices: Vec<PackagePrice> = prices
+            .iter()
+            .filter(|p| p.package_id == package.id)
+            .cloned()
+            .collect();
+        
+        packages_with_prices.push(PackageWithPrices {
+            package,
+            prices: package_prices,
+        });
+    }
+    
+    Ok(packages_with_prices)
 }

@@ -8,6 +8,7 @@
     import { Card, CardContent, CardHeader, CardTitle } from "$lib/components/ui/card";
     import { Button } from "$lib/components/ui/button";
     import { Badge } from "$lib/components/ui/badge";
+    import { Tabs, TabsContent, TabsList, TabsTrigger } from "$lib/components/ui/tabs";
     import { 
         CreditCardIcon, 
         CalendarIcon, 
@@ -24,13 +25,11 @@
     let creatingSubscription = false;
     let cancellingSubscription = false;
     let showCancelConfirm = false;
+    let selectedTab = "monthly";
 
-    // Environment variables for Stripe configuration
-    const STRIPE_PRODUCT_ID = import.meta.env.VITE_STRIPE_PRODUCT_ID;
-
-    // Dynamic pricing plans - loaded from Stripe
+    // Dynamic pricing plans - loaded from database
     let pricingPlans: any[] = [];
-    let productInfo: any = null;
+    let subscriptionPlanData: any = null;
 
     // Reactive subscriptions to cached data
     $: subscriptionData = $subscriptionStore.subscriptionData;
@@ -46,6 +45,10 @@
     $: shouldShowPlans = !subscriptionData || 
         !currentProfile?.subscription_status || 
         (subscriptionData.status === 'canceled' && subscriptionExpired);
+    
+    // Separate monthly and yearly plans
+    $: monthlyPlans = pricingPlans.filter(plan => plan.interval === 'month');
+    $: yearlyPlans = pricingPlans.filter(plan => plan.interval === 'year');
 
     onMount(async () => {
         loading = true;
@@ -68,52 +71,60 @@
 
     async function loadProductData() {
         try {
-            if (!STRIPE_PRODUCT_ID) {
-                throw new Error('STRIPE_PRODUCT_ID not configured. Please check your environment variables.');
-            }
-            
             // Use proper cache manager with Tauri store backend
-            const cacheKey = `stripe_product_${STRIPE_PRODUCT_ID}`;
+            const cacheKey = 'subscription_plans_with_prices';
             
             // Check cache first (uses Tauri store)
             if (cacheManager.has(cacheKey)) {
-                const cachedData = cacheManager.get<{productInfo: any, pricingPlans: any[]}>(cacheKey);
+                const cachedData = cacheManager.get<{subscriptionPlanData: any, pricingPlans: any[]}>(cacheKey);
                 if (cachedData) {
-                    productInfo = cachedData.productInfo;
+                    subscriptionPlanData = cachedData.subscriptionPlanData;
                     pricingPlans = cachedData.pricingPlans;
                     return;
                 }
             }
             
-            // Load from API if not cached or expired
-            productInfo = await invoke('get_product_with_prices', {
-                productId: STRIPE_PRODUCT_ID
-            });
+            // Load from database if not cached or expired
+            subscriptionPlanData = await invoke('get_subscription_plans_with_prices');
 
-            // Transform Stripe prices into our pricing plans format
-            pricingPlans = productInfo.prices.map((price: any) => {
-                const isYearly = price.interval === 'year';
-                const monthlyAmount = isYearly ? price.amount / 12 : price.amount;
-                const savings = isYearly ? Math.round((1 - (price.amount / 12) / (productInfo.prices.find((p: any) => p.interval === 'month')?.amount || price.amount)) * 100) : 0;
+            // Transform database data into our pricing plans format
+            pricingPlans = [];
+            
+            for (const planWithPrices of subscriptionPlanData) {
+                const plan = planWithPrices.plan;
+                const prices = planWithPrices.prices;
                 
-                return {
-                    id: price.interval,
-                    name: price.interval === 'month' ? 'Monthly' : 'Yearly',
-                    price: `$${(price.amount / 100).toFixed(2)}`,
-                    interval: price.interval,
-                    priceId: price.id,
-                    popular: price.interval === 'year',
-                    savings: savings > 0 ? `Save ${savings}%` : undefined,
-                    features: [
-                        'Full access to all features',
-                        'Priority support',
-                        'Regular updates'
-                    ]
-                };
-            });
+                for (const price of prices) {
+                    const isYearly = price.interval_type === 'year';
+                    const monthlyPrice = prices.find((p: any) => p.interval_type === 'month');
+                    const yearlyPrice = prices.find((p: any) => p.interval_type === 'year');
+                    
+                    // Calculate savings for yearly plan
+                    let savings = 0;
+                    if (isYearly && monthlyPrice) {
+                        const monthlyTotal = monthlyPrice.amount_cents * 12;
+                        savings = Math.round((1 - (price.amount_cents / monthlyTotal)) * 100);
+                    }
+                    
+                    pricingPlans.push({
+                        id: price.interval_type,
+                        name: price.interval_type === 'month' ? 'Monthly' : 'Yearly',
+                        price: `$${(price.amount_cents / 100).toFixed(2)}`,
+                        interval: price.interval_type,
+                        priceId: price.stripe_price_id,
+                        popular: price.interval_type === 'year',
+                        savings: savings > 0 ? `Save ${savings}%` : undefined,
+                        features: plan.features || [
+                            'Full access to all features',
+                            'Priority support',
+                            'Regular updates'
+                        ]
+                    });
+                }
+            }
             
             // Cache the results using Tauri store (10 minute TTL)
-            cacheManager.set(cacheKey, { productInfo, pricingPlans }, 10 * 60 * 1000);
+            cacheManager.set(cacheKey, { subscriptionPlanData, pricingPlans }, 10 * 60 * 1000);
 
         } catch (err) {
             console.error('Failed to load product data:', err);
@@ -203,7 +214,7 @@
     }
 </script>
 
-<AppLayout title="Subscription" showBackButton={true} onBack={goBack} maxWidth="max-w-4xl">
+<AppLayout title="Subscription" showBackButton={true} onBack={goBack} maxWidth="max-w-3xl">
     {#if loading}
         <div class="flex justify-center items-center py-12">
             <div class="w-8 h-8 border-4 border-primary/20 border-t-primary rounded-full animate-spin"></div>
@@ -326,72 +337,131 @@
                 {/if}
             {/if}
         {:else if shouldShowPlans && pricingPlans.length > 0}
-            <!-- Subscription Plans -->
+            <!-- Subscription Plans with Tabs -->
             <div class="mb-8">
                 <div class="text-center mb-8">
                     <h2 class="text-2xl font-bold mb-2">Choose Your Plan</h2>
                     <p class="text-muted-foreground">Select the plan that works best for you</p>
                 </div>
                 
-                <div class="grid md:grid-cols-2 gap-6 max-w-4xl mx-auto">
-                    {#each pricingPlans as plan}
-                        <Card class="relative {plan.popular ? 'border-primary shadow-lg scale-105' : ''}">
-                            {#if plan.popular}
-                                <div class="absolute -top-3 left-1/2 transform -translate-x-1/2">
-                                    <Badge class="bg-primary text-primary-foreground px-3 py-1">Most Popular</Badge>
-                                </div>
+                <Tabs bind:value={selectedTab} class="w-full">
+                    <TabsList class="grid w-full grid-cols-2 mb-8">
+                        <TabsTrigger value="monthly">Monthly</TabsTrigger>
+                        <TabsTrigger value="yearly">
+                            Yearly
+                            {#if yearlyPlans.length > 0 && yearlyPlans[0].savings}
+                                <Badge variant="secondary" class="ml-2 text-xs bg-green-100 text-green-700">{yearlyPlans[0].savings}</Badge>
                             {/if}
-                            
-                            <CardHeader class="text-center pb-4">
-                                <CardTitle class="flex items-center justify-center gap-2 mb-4">
-                                    <CrownIcon class="w-5 h-5" />
-                                    {plan.name}
-                                </CardTitle>
-                                <div class="space-y-2">
-                                    <div class="text-4xl font-bold">{plan.price}</div>
-                                    <div class="text-sm text-muted-foreground">per {plan.interval}</div>
-                                    {#if plan.savings}
-                                        <Badge variant="secondary" class="text-xs bg-green-100 text-green-700">{plan.savings}</Badge>
-                                    {/if}
-                                </div>
-                            </CardHeader>
-                            
-                            <CardContent class="space-y-6 pt-0">
-                                <ul class="space-y-3">
-                                    {#each plan.features as feature}
-                                        <li class="flex items-center gap-3 text-sm">
-                                            <CheckCircleIcon class="w-4 h-4 text-primary flex-shrink-0" />
-                                            <span>{feature}</span>
-                                        </li>
-                                    {/each}
-                                </ul>
+                        </TabsTrigger>
+                    </TabsList>
+                    
+                    <TabsContent value="monthly" class="space-y-6">
+                        {#each monthlyPlans as plan}
+                            <Card class="max-w-lg mx-auto">
+                                <CardHeader class="text-center pb-4">
+                                    <CardTitle class="flex items-center justify-center gap-2 mb-4">
+                                        <CrownIcon class="w-5 h-5" />
+                                        {plan.name}
+                                    </CardTitle>
+                                    <div class="space-y-2">
+                                        <div class="text-4xl font-bold">{plan.price}</div>
+                                        <div class="text-sm text-muted-foreground">per {plan.interval}</div>
+                                    </div>
+                                </CardHeader>
                                 
-                                <Button 
-                                    class="w-full" 
-                                    variant={plan.popular ? 'default' : 'outline'}
-                                    onclick={() => createSubscription(plan.priceId)}
-                                    disabled={!hasPaymentMethod || creatingSubscription}
-                                >
+                                <CardContent class="space-y-6 pt-0">
+                                    <ul class="space-y-3">
+                                        {#each plan.features as feature}
+                                            <li class="flex items-center gap-3 text-sm">
+                                                <CheckCircleIcon class="w-4 h-4 text-primary flex-shrink-0" />
+                                                <span>{feature}</span>
+                                            </li>
+                                        {/each}
+                                    </ul>
+                                    
+                                    <Button 
+                                        class="w-full" 
+                                        onclick={() => createSubscription(plan.priceId)}
+                                        disabled={!hasPaymentMethod || creatingSubscription}
+                                    >
+                                        {#if !hasPaymentMethod}
+                                            Add Payment Method First
+                                        {:else if creatingSubscription}
+                                            Processing...
+                                        {:else}
+                                            Subscribe to {plan.name}
+                                        {/if}
+                                    </Button>
+                                    
                                     {#if !hasPaymentMethod}
-                                        Add Payment Method First
-                                    {:else if creatingSubscription}
-                                        Processing...
-                                    {:else}
-                                        Subscribe to {plan.name}
+                                        <p class="text-xs text-center text-muted-foreground">
+                                            <a href="/settings/payment-methods" class="text-primary hover:underline">
+                                                Add a payment method
+                                            </a> to get started
+                                        </p>
                                     {/if}
-                                </Button>
+                                </CardContent>
+                            </Card>
+                        {/each}
+                    </TabsContent>
+                    
+                    <TabsContent value="yearly" class="space-y-6">
+                        {#each yearlyPlans as plan}
+                            <Card class="max-w-lg mx-auto border-primary shadow-lg relative">
+                                <div class="absolute -top-3 left-1/2 transform -translate-x-1/2">
+                                    <Badge class="bg-primary text-primary-foreground px-3 py-1">Best Value</Badge>
+                                </div>
                                 
-                                {#if !hasPaymentMethod}
-                                    <p class="text-xs text-center text-muted-foreground">
-                                        <a href="/settings/payment-methods" class="text-primary hover:underline">
-                                            Add a payment method
-                                        </a> to get started
-                                    </p>
-                                {/if}
-                            </CardContent>
-                        </Card>
-                    {/each}
-                </div>
+                                <CardHeader class="text-center pb-4">
+                                    <CardTitle class="flex items-center justify-center gap-2 mb-4">
+                                        <CrownIcon class="w-5 h-5" />
+                                        {plan.name}
+                                    </CardTitle>
+                                    <div class="space-y-2">
+                                        <div class="text-4xl font-bold">{plan.price}</div>
+                                        <div class="text-sm text-muted-foreground">per {plan.interval}</div>
+                                        {#if plan.savings}
+                                            <Badge variant="secondary" class="text-xs bg-green-100 text-green-700">{plan.savings}</Badge>
+                                        {/if}
+                                    </div>
+                                </CardHeader>
+                                
+                                <CardContent class="space-y-6 pt-0">
+                                    <ul class="space-y-3">
+                                        {#each plan.features as feature}
+                                            <li class="flex items-center gap-3 text-sm">
+                                                <CheckCircleIcon class="w-4 h-4 text-primary flex-shrink-0" />
+                                                <span>{feature}</span>
+                                            </li>
+                                        {/each}
+                                    </ul>
+                                    
+                                    <Button 
+                                        class="w-full" 
+                                        onclick={() => createSubscription(plan.priceId)}
+                                        disabled={!hasPaymentMethod || creatingSubscription}
+                                    >
+                                        {#if !hasPaymentMethod}
+                                            Add Payment Method First
+                                        {:else if creatingSubscription}
+                                            Processing...
+                                        {:else}
+                                            Subscribe to {plan.name}
+                                        {/if}
+                                    </Button>
+                                    
+                                    {#if !hasPaymentMethod}
+                                        <p class="text-xs text-center text-muted-foreground">
+                                            <a href="/settings/payment-methods" class="text-primary hover:underline">
+                                                Add a payment method
+                                            </a> to get started
+                                        </p>
+                                    {/if}
+                                </CardContent>
+                            </Card>
+                        {/each}
+                    </TabsContent>
+                </Tabs>
             </div>
         {:else}
             <!-- Error loading product -->

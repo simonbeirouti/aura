@@ -84,7 +84,7 @@
                             <div>
                                 <p class="text-sm text-muted-foreground mb-1">Token Balance</p>
                                 <p class="text-lg text-foreground font-medium">
-                                    {(profile?.tokens_remaining || 0).toLocaleString()} tokens
+                                    {(profile?.tokens_remaining || 0).toLocaleString()}
                                 </p>
                             </div>
                         </div>

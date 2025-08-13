@@ -115,7 +115,7 @@
             <div class="inline-flex items-center gap-2 bg-muted/50 rounded-lg px-4 py-2">
               <CoinsIcon class="w-5 h-5 text-primary" />
               <span class="text-lg font-semibold text-foreground">
-                {($dataStore.currentProfile.tokens_remaining || 0).toLocaleString()} tokens
+                {($dataStore.currentProfile.tokens_remaining || 0).toLocaleString()}
               </span>
             </div>
           </div>

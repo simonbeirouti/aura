@@ -72,7 +72,7 @@
                 <div class="w-full mx-auto">
                     <!-- Progress Indicator -->
                     <div class="flex justify-center gap-2 mb-16">
-                        {#each Array(totalSteps) as _, i}
+                        {#each Array(3) as _, i}
                             <div
                                 class="w-3 h-3 rounded-full transition-colors duration-300 {i + 1 <= currentStep
                                     ? 'bg-primary'
