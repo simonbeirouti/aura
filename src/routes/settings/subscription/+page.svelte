@@ -1,7 +1,7 @@
 <script lang="ts">
     import { onMount } from "svelte";
     import { goto } from "$app/navigation";
-    import AppLayout from "../../../lib/components/AppLayout.svelte";
+    import AppLayout from "$lib/components/AppLayout.svelte";
     import { centralizedAuth } from "$lib/stores/unifiedAuth";
     import { settingsActions, subscriptionStore, paymentMethodsStore, profileStore } from '$lib/stores/settingsStore';
     import { cacheManager } from '$lib/stores/cacheManager';

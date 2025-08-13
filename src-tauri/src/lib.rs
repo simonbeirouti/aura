@@ -132,6 +132,7 @@ pub fn run() {
             database::update_subscription_status,
             database::get_subscription_plans_with_prices,
             database::get_packages_with_prices,
+            database::get_user_purchases,
             // Migration management commands
             migrations::get_migration_status,
             migrations::run_migrations,

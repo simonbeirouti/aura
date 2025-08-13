@@ -1,23 +1,20 @@
 <script lang="ts">
     import { onMount } from "svelte";
-    import AppLayout from "../../lib/components/AppLayout.svelte";
-    import { centralizedAuth } from "../../lib/stores/unifiedAuth";
-    import { settingsActions, profileStore } from "../../lib/stores/settingsStore";
+    import AppLayout from "$lib/components/AppLayout.svelte";
+    import { centralizedAuth } from "$lib/stores/unifiedAuth";
+    import { settingsActions, profileStore } from "$lib/stores/settingsStore";
     import { goto } from "$app/navigation";
     import {
-        ArrowLeftIcon,
         UserIcon,
         CreditCardIcon,
-        Users,
-        Gift,
-        FileText,
         ChevronRight,
         LogOut,
         CrownIcon,
+        HistoryIcon,
     } from "lucide-svelte";
-    import { Card, CardContent, CardHeader, CardTitle } from "$lib/components/ui/card";
+    import { Card, CardContent } from "$lib/components/ui/card";
     import { Button } from "$lib/components/ui/button";
-    import ModeToggle from "../../lib/components/ModeToggle.svelte";
+    import ModeToggle from "$lib/components/ModeToggle.svelte";
 
     // Reactive profile data from store
     $: ({ profile, loading: isLoading, error } = $profileStore);
@@ -33,12 +30,18 @@
 
     async function handleSignOut() {
         await centralizedAuth.handleLogout();
-        // Don't use goto - let the layout handle the authentication state change
     }
 
     function navigateTo(path: string) {
         goto(path);
     }
+
+    // Navigation items array with title and link
+    const navigationItems = [
+        { title: "Purchase History", link: "/settings/purchases", icon: HistoryIcon },
+        { title: "Subscription", link: "/settings/subscription", icon: CrownIcon },
+        { title: "Payment methods", link: "/settings/payment-methods", icon: CreditCardIcon }
+    ];
 </script>
 
 <AppLayout title="Settings" showBackButton={true} onBack={goBack} maxWidth="max-w-2xl">
@@ -95,31 +98,19 @@
 
             <!-- Navigation Links -->
         <div class="space-y-2">
-            <!-- Subscription -->
-            <Button 
-                variant="ghost"
-                class="w-full justify-between h-auto p-4"
-                onclick={() => navigateTo('/settings/subscription')}
-            >
-                <div class="flex items-center gap-3">
-                    <CrownIcon class="w-5 h-5 text-muted-foreground" />
-                    <span class="text-foreground font-medium">Subscription</span>
-                </div>
-                <ChevronRight class="w-5 h-5 text-muted-foreground" />
-            </Button>
-
-            <!-- Payment Methods -->
-            <Button 
-                variant="ghost"
-                class="w-full justify-between h-auto p-4"
-                onclick={() => navigateTo('/settings/payment-methods')}
-            >
-                <div class="flex items-center gap-3">
-                    <CreditCardIcon class="w-5 h-5 text-muted-foreground" />
-                    <span class="text-foreground font-medium">Payment methods</span>
-                </div>
-                <ChevronRight class="w-5 h-5 text-muted-foreground" />
-            </Button>
+            {#each navigationItems as item}
+                <Button 
+                    variant="ghost"
+                    class="w-full justify-between h-auto p-4"
+                    onclick={() => navigateTo(item.link)}
+                >
+                    <div class="flex items-center gap-3">
+                        <svelte:component this={item.icon} class="w-5 h-5 text-muted-foreground" />
+                        <span class="text-foreground font-medium">{item.title}</span>
+                    </div>
+                    <ChevronRight class="w-5 h-5 text-muted-foreground" />
+                </Button>
+            {/each}
 
             <!-- Logout -->
             <Button 

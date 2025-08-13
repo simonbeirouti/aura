@@ -362,6 +362,28 @@ class CacheManager {
     };
   }
 
+  // Handle purchase completion - invalidate relevant caches
+  handlePurchaseCompletion(userId: string): void {
+    console.log('Cache manager: Handling purchase completion for user:', userId);
+    
+    // Invalidate all user-specific data that might change after purchase
+    const keysToInvalidate = [
+      cacheKeys.profile(userId),
+      cacheKeys.userTokenBalance(userId),
+      cacheKeys.userPurchases(userId),
+      cacheKeys.packages() // Package data might include user-specific access info
+    ];
+
+    let invalidatedCount = 0;
+    keysToInvalidate.forEach(key => {
+      if (this.delete(key)) {
+        invalidatedCount++;
+      }
+    });
+
+    console.log(`Cache manager: Invalidated ${invalidatedCount} cache entries after purchase completion`);
+  }
+
   // Destroy cache manager
   destroy(): void {
     if (this.cleanupTimer) {
@@ -401,7 +423,11 @@ export const cacheKeys = {
   subscription: (userId: string) => `subscription:${userId}`,
   stripeCustomer: (userId: string) => `stripe_customer:${userId}`,
   stripeProduct: (productId: string) => `stripe_product:${productId}`,
-  userPattern: (userId: string) => `*:${userId}*`
+  userPattern: (userId: string) => `*:${userId}*`,
+  // Purchase-related cache keys
+  userTokenBalance: (userId: string) => `token_balance:${userId}`,
+  userPurchases: (userId: string) => `purchases:${userId}`,
+  packages: () => 'packages_with_prices'
 };
 
 // Cleanup on app close

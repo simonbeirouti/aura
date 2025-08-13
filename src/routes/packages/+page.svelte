@@ -6,7 +6,8 @@
   import AppLayout from "$lib/components/AppLayout.svelte";
   import { centralizedAuth } from "$lib/stores/unifiedAuth";
   import { stripeStore } from "$lib/stores/stripeStore";
-  import { cacheManager } from "$lib/stores/cacheManager";
+  import { cacheManager, cacheKeys } from "$lib/stores/cacheManager";
+  import { settingsActions } from "$lib/stores/settingsStore";
   import {
     Card,
     CardContent,
@@ -76,7 +77,7 @@
       error = null;
 
       // Use proper cache manager with Tauri store backend
-      const cacheKey = "packages_with_prices";
+      const cacheKey = cacheKeys.packages();
 
       // Check cache first (uses Tauri store)
       if (cacheManager.has(cacheKey)) {
@@ -170,8 +171,11 @@
         // Close drawer after successful purchase
         closePurchaseDrawer();
 
-        // Refresh package data to show updated user access
-        await loadPackages();
+        // Handle purchase completion - refresh profile and token balance
+        await Promise.allSettled([
+          centralizedAuth.refreshProfile(),
+          settingsActions.handlePurchaseCompletion()
+        ]);
       } catch (recordError) {
         console.error("❌ Failed to record purchase:", recordError);
         toast.error(

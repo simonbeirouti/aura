@@ -2,13 +2,13 @@
   import { onMount } from "svelte";
   import "../app.css";
   import { ModeWatcher } from "mode-watcher";
-  import { Toaster } from "../lib/components/ui/sonner";
-  import GlobalLoading from "../lib/components/GlobalLoading.svelte";
-  import Onboarding from "../lib/components/Onboarding.svelte";
-  import FooterNavigation from "../lib/components/FooterNavigation.svelte";
-  import FloatingDebugger from "../lib/components/FloatingDebugger.svelte";
-  import { centralizedAuth } from "../lib/stores/unifiedAuth";
-  import { loadingActions } from "../lib/stores/loadingStore";
+  import { Toaster } from "$lib/components/ui/sonner";
+  import GlobalLoading from "$lib/components/GlobalLoading.svelte";
+  import Onboarding from "$lib/components/Onboarding.svelte";
+  import FooterNavigation from "$lib/components/FooterNavigation.svelte";
+  import FloatingDebugger from "$lib/components/FloatingDebugger.svelte";
+  import { centralizedAuth } from "$lib/stores/unifiedAuth";
+  import { loadingActions } from "$lib/stores/loadingStore";
   import { toast } from "svelte-sonner";
 
   // Access derived stores properly

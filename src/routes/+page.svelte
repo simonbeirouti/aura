@@ -1,11 +1,11 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { CogIcon, PlayIcon, CoinsIcon } from "lucide-svelte";
-  import AppLayout from "../lib/components/AppLayout.svelte";
-  import OnboardingProfile from "../lib/components/onboarding/OnboardingProfile.svelte";
-  import { centralizedAuth } from "../lib/stores/unifiedAuth";
-  import { dataActions, dataStore } from "../lib/stores/dataStore";
-  import { loadingActions } from "../lib/stores/loadingStore";
+  import AppLayout from "$lib/components/AppLayout.svelte";
+  import OnboardingProfile from "$lib/components/onboarding/OnboardingProfile.svelte";
+  import { centralizedAuth } from "$lib/stores/unifiedAuth";
+  import { dataActions, dataStore } from "$lib/stores/dataStore";
+  import { loadingActions } from "$lib/stores/loadingStore";
 
   import { goto } from "$app/navigation";
   import { Card, CardContent, CardHeader, CardTitle } from "$lib/components/ui/card";

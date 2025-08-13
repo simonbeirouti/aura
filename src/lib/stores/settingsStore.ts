@@ -510,6 +510,82 @@ export const settingsActions = {
       this.loadPaymentMethods(true),
       this.loadSubscription(true)
     ]);
+  },
+
+  // Purchase completion hook
+  async handlePurchaseCompletion(): Promise<void> {
+    const userId = getCurrentUserId();
+    if (!userId) return;
+
+    console.log('Settings store: Handling purchase completion, refreshing profile...');
+
+    try {
+      // Use cache manager to handle purchase completion cache invalidation
+      cacheManager.handlePurchaseCompletion(userId);
+      
+      // Also explicitly invalidate purchases cache
+      this.invalidatePurchasesCache();
+      
+      // Force refresh profile to get updated token balance
+      await this.loadProfile(true);
+      
+      console.log('Settings store: Profile and purchases cache refreshed after purchase');
+    } catch (error) {
+      console.error('Settings store: Failed to refresh profile after purchase:', error);
+    }
+  },
+
+  // Token balance refresh (specific method for token updates)
+  async refreshTokenBalance(): Promise<Profile | null> {
+    const userId = getCurrentUserId();
+    if (!userId) return null;
+
+    try {
+      // Force refresh profile data to get latest token balances
+      const profile = await this.loadProfile(true);
+      
+      if (profile) {
+        console.log('Settings store: Token balance refreshed:', {
+          total_tokens: profile.total_tokens,
+          tokens_remaining: profile.tokens_remaining,
+          tokens_used: profile.tokens_used
+        });
+      }
+      
+      return profile;
+    } catch (error) {
+      console.error('Settings store: Failed to refresh token balance:', error);
+      return null;
+    }
+  },
+
+  // Purchases cache management
+  invalidatePurchasesCache(): void {
+    const userId = getCurrentUserId();
+    if (userId) {
+      cacheManager.delete(cacheKeys.userPurchases(userId));
+      console.log('Settings store: Purchases cache invalidated');
+    }
+  },
+
+  async refreshPurchasesInBackground(): Promise<void> {
+    const userId = getCurrentUserId();
+    if (!userId) return;
+
+    const cacheKey = cacheKeys.userPurchases(userId);
+    
+    // Only refresh if cache is getting stale
+    if (cacheManager.has(cacheKey)) {
+      return; // Still fresh
+    }
+
+    try {
+      console.log('Settings store: Background refresh of purchases cache');
+      // This would trigger a background load if the purchases page is loaded
+      // For now, we just log that the cache is stale
+    } catch (error) {
+      console.warn('Settings store: Background purchases refresh failed:', error);
+    }
   }
 };
 

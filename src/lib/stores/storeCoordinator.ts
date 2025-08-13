@@ -155,6 +155,11 @@ class StoreCoordinator {
       refreshTasks.push(settingsActions.loadSubscription(true));
     }
 
+    // Background refresh purchases cache if needed
+    if (!cacheManager.has(cacheKeys.userPurchases(userId))) {
+      refreshTasks.push(settingsActions.refreshPurchasesInBackground());
+    }
+
     if (refreshTasks.length > 0) {
       console.log(`Store coordinator: Smart refresh - updating ${refreshTasks.length} stale caches`);
       await Promise.allSettled(refreshTasks);

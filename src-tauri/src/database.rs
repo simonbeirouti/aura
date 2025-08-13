@@ -62,6 +62,24 @@ pub struct CreatePaymentMethodRequest {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+pub struct Purchase {
+    pub id: String,
+    pub user_id: String,
+    pub stripe_payment_intent_id: String,
+    pub stripe_price_id: String,
+    pub stripe_product_id: Option<String>,
+    pub package_id: Option<String>,
+    pub package_price_id: Option<String>,
+    pub amount_paid: i64,
+    pub currency: String,
+    pub tokens_purchased: Option<i64>,
+    pub status: String,
+    pub completed_at: Option<String>,
+    pub created_at: Option<String>,
+    pub updated_at: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct UpdatePaymentMethodRequest {
     pub payment_method_id: String,
     pub user_id: String,
@@ -944,4 +962,50 @@ pub async fn get_packages_with_prices(
     }
     
     Ok(packages_with_prices)
+}
+
+/// Get user's purchase history from database
+#[command]
+pub async fn get_user_purchases(
+    user_id: String,
+    app: tauri::AppHandle,
+) -> Result<Vec<Purchase>, String> {
+    let db_config = get_authenticated_db(&app).await?;
+
+    // Verify user is authenticated by checking if they have a valid session
+    let session_check = crate::session::check_session(app.clone()).await?;
+    if !session_check {
+        return Err("Authentication required".to_string());
+    }
+
+    let client = reqwest::Client::new();
+    
+    let url = format!("{}/rest/v1/purchases", db_config.database_url);
+    
+    let response = client
+        .get(&url)
+        .header("Authorization", format!("Bearer {}", db_config.access_token))
+        .header("apikey", &db_config.anon_key)
+        .query(&[
+            ("user_id", format!("eq.{}", user_id)),
+            ("status", "eq.completed".to_string()),
+            ("order", "completed_at.desc".to_string()),
+            ("select", "id,user_id,stripe_payment_intent_id,stripe_price_id,stripe_product_id,package_id,package_price_id,amount_paid,currency,tokens_purchased,status,completed_at,created_at,updated_at".to_string())
+        ])
+        .send()
+        .await
+        .map_err(|e| format!("Failed to fetch purchases: {}", e))?;
+    
+    let status = response.status();
+    if !status.is_success() {
+        let error_body = response.text().await.unwrap_or_else(|_| "Could not read error body".to_string());
+        return Err(format!("Database query failed: {} - {}", status, error_body));
+    }
+    
+    let purchases: Vec<Purchase> = response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse purchases response: {}", e))?;
+    
+    Ok(purchases)
 }

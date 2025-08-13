@@ -586,7 +586,17 @@ class UnifiedAuthStore {
     }
 
     try {
+      console.log('Unified auth: Refreshing profile to get latest token balance...');
       const profile = await dataActions.getUserProfile(state.user.id, true); // Force refresh
+      
+      if (profile) {
+        console.log('Unified auth: Profile refreshed with token balance:', {
+          total_tokens: profile.total_tokens,
+          tokens_remaining: profile.tokens_remaining,
+          tokens_used: profile.tokens_used
+        });
+      }
+      
       this.store.update(s => ({ ...s, profile, profileLoaded: true }));
     } catch (error) {
       console.error('Failed to refresh profile:', error);
@@ -675,4 +685,4 @@ export const authStore = new UnifiedAuthStore();
 export const centralizedAuth = authStore;
 
 // Export types
-export type { UnifiedAuthState, InitializationResult };
+export type { UnifiedAuthState };

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import AppLayout from "../../lib/components/AppLayout.svelte";
+  import AppLayout from "$lib/components/AppLayout.svelte";
   import { goto } from "$app/navigation";
   import { ArrowLeftIcon } from "lucide-svelte";
   import { Card, CardContent, CardHeader, CardTitle } from "$lib/components/ui/card";
