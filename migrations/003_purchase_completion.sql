@@ -81,15 +81,12 @@ ALTER TABLE profiles ADD COLUMN IF NOT EXISTS total_tokens BIGINT DEFAULT 0; -- 
 ALTER TABLE profiles ADD COLUMN IF NOT EXISTS tokens_remaining BIGINT DEFAULT 0; -- Current token balance
 ALTER TABLE profiles ADD COLUMN IF NOT EXISTS tokens_used BIGINT DEFAULT 0; -- Total tokens consumed
 
--- Create package definitions table
+-- Create package definitions table (simplified, no bonus)
 CREATE TABLE IF NOT EXISTS packages (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name TEXT NOT NULL,
     description TEXT,
     stripe_product_id TEXT UNIQUE NOT NULL,
-    token_amount BIGINT NOT NULL, -- Number of tokens this package provides
-    bonus_percentage DECIMAL(5,2) DEFAULT 0, -- Bonus percentage for bulk purchases (e.g. 10.00 for 10%)
-    effective_token_amount BIGINT, -- Actual tokens including bonus (calculated field)
     features JSONB DEFAULT '[]'::jsonb, -- Array of feature descriptions
     is_active BOOLEAN DEFAULT true,
     sort_order INTEGER DEFAULT 0,
@@ -97,7 +94,16 @@ CREATE TABLE IF NOT EXISTS packages (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Create package prices table (one package can have multiple pricing options)
+-- Drop dependent views before dropping columns
+DROP VIEW IF EXISTS user_purchases_detailed;
+DROP VIEW IF EXISTS user_token_balance;
+
+-- Drop removed columns from packages
+ALTER TABLE packages DROP COLUMN IF EXISTS token_amount;
+ALTER TABLE packages DROP COLUMN IF EXISTS bonus_percentage;
+ALTER TABLE packages DROP COLUMN IF EXISTS effective_token_amount;
+
+-- Create package prices table (added token_amount)
 CREATE TABLE IF NOT EXISTS package_prices (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     package_id UUID NOT NULL REFERENCES packages(id) ON DELETE CASCADE,
@@ -106,10 +112,21 @@ CREATE TABLE IF NOT EXISTS package_prices (
     currency TEXT NOT NULL DEFAULT 'usd',
     interval_type TEXT NOT NULL DEFAULT 'one_time', -- one_time, month, year
     interval_count INTEGER DEFAULT 1,
+    token_amount BIGINT NOT NULL, -- Tokens provided by this price tier
     is_active BOOLEAN DEFAULT true,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Add new column if not exists
+ALTER TABLE package_prices ADD COLUMN IF NOT EXISTS token_amount BIGINT DEFAULT 0;
+
+-- Optionally, if you want to enforce NOT NULL after adding:
+-- UPDATE package_prices SET token_amount = 0 WHERE token_amount IS NULL;
+-- ALTER TABLE package_prices ALTER COLUMN token_amount SET NOT NULL;
+-- ALTER TABLE package_prices ALTER COLUMN token_amount DROP DEFAULT;
+
+-- Then later in the INSERT, it will set proper values
 
 -- Create user token transactions table (tracks token purchases and usage)
 CREATE TABLE IF NOT EXISTS user_token_transactions (
@@ -136,7 +153,6 @@ ALTER TABLE purchases ADD COLUMN IF NOT EXISTS tokens_purchased BIGINT DEFAULT 0
 
 -- Create indexes for better performance
 CREATE INDEX IF NOT EXISTS idx_packages_stripe_product_id ON packages(stripe_product_id);
-CREATE INDEX IF NOT EXISTS idx_packages_token_amount ON packages(token_amount);
 CREATE INDEX IF NOT EXISTS idx_packages_is_active ON packages(is_active);
 
 CREATE INDEX IF NOT EXISTS idx_package_prices_package_id ON package_prices(package_id);
@@ -156,60 +172,43 @@ CREATE INDEX IF NOT EXISTS idx_purchases_tokens_purchased ON purchases(tokens_pu
 CREATE OR REPLACE FUNCTION update_profile_purchase_stats()
 RETURNS TRIGGER AS $$
 DECLARE
-    package_tokens BIGINT := 0;
-    bonus_tokens BIGINT := 0;
-    total_tokens BIGINT := 0;
-    package_info RECORD;
+    token_amount BIGINT := 0;
 BEGIN
-    -- Only update stats when status changes to completed
-    IF NEW.status = 'completed' AND (OLD.status IS NULL OR OLD.status != 'completed') THEN
-        -- Get package token information if package_id is set
-        IF NEW.package_id IS NOT NULL THEN
-            SELECT token_amount, bonus_percentage, effective_token_amount
-            INTO package_info
-            FROM packages 
-            WHERE id = NEW.package_id;
-            
-            IF FOUND THEN
-                -- Calculate tokens (use effective_token_amount if set, otherwise calculate)
-                IF package_info.effective_token_amount IS NOT NULL THEN
-                    total_tokens := package_info.effective_token_amount;
-                ELSE
-                    package_tokens := package_info.token_amount;
-                    bonus_tokens := FLOOR(package_tokens * package_info.bonus_percentage / 100);
-                    total_tokens := package_tokens + bonus_tokens;
-                END IF;
-                
-                -- Update tokens_purchased in the purchase record
-                UPDATE purchases 
-                SET tokens_purchased = total_tokens 
-                WHERE id = NEW.id;
-                
-                -- Create token transaction record
-                INSERT INTO user_token_transactions (
-                    user_id, package_id, purchase_id, transaction_type, 
-                    token_amount, description, metadata
-                ) VALUES (
-                    NEW.user_id, NEW.package_id, NEW.id, 'purchase',
-                    total_tokens, 
-                    'Token purchase: ' || package_info.token_amount || ' tokens' || 
-                    CASE WHEN bonus_tokens > 0 THEN ' + ' || bonus_tokens || ' bonus' ELSE '' END,
-                    jsonb_build_object(
-                        'base_tokens', package_tokens,
-                        'bonus_tokens', bonus_tokens,
-                        'bonus_percentage', package_info.bonus_percentage
-                    )
-                );
-            END IF;
+    IF (TG_OP = 'INSERT' AND NEW.status = 'completed') OR
+       (TG_OP = 'UPDATE' AND NEW.status = 'completed' AND OLD.status != 'completed') THEN
+        
+        -- Get token amount from package_prices
+        SELECT token_amount INTO token_amount
+        FROM package_prices 
+        WHERE id = NEW.package_price_id;
+        
+        IF token_amount IS NULL THEN
+            RAISE EXCEPTION 'No token amount found for package price %', NEW.package_price_id;
         END IF;
+        
+        NEW.tokens_purchased = token_amount;
+        
+        -- Create token transaction record
+        INSERT INTO user_token_transactions (
+            user_id, package_id, purchase_id, transaction_type, 
+            token_amount, description, metadata
+        ) VALUES (
+            NEW.user_id, NEW.package_id, NEW.id, 'purchase',
+            token_amount, 
+            'Token purchase: ' || token_amount || ' tokens',
+            jsonb_build_object(
+                'price_cents', NEW.amount_paid,
+                'currency', NEW.currency
+            )
+        );
         
         -- Update profile stats
         UPDATE profiles 
         SET 
             total_purchases = COALESCE(total_purchases, 0) + 1,
             total_spent_cents = COALESCE(total_spent_cents, 0) + NEW.amount_paid,
-            total_tokens = COALESCE(total_tokens, 0) + COALESCE(total_tokens, 0),
-            tokens_remaining = COALESCE(tokens_remaining, 0) + COALESCE(total_tokens, 0),
+            total_tokens = COALESCE(total_tokens, 0) + token_amount,
+            tokens_remaining = COALESCE(tokens_remaining, 0) + token_amount,
             last_purchase_at = NEW.completed_at,
             updated_at = NOW()
         WHERE id = NEW.user_id;
@@ -219,36 +218,23 @@ BEGIN
 END;
 $$ language 'plpgsql';
 
+DROP TRIGGER IF EXISTS update_profile_stats_on_purchase_completion ON purchases;
 CREATE TRIGGER update_profile_stats_on_purchase_completion
-    AFTER UPDATE ON purchases
+    BEFORE INSERT OR UPDATE ON purchases
     FOR EACH ROW
     EXECUTE FUNCTION update_profile_purchase_stats();
 
 -- Create trigger to update package prices updated_at
+DROP TRIGGER IF EXISTS update_package_prices_updated_at ON package_prices;
 CREATE TRIGGER update_package_prices_updated_at 
     BEFORE UPDATE ON package_prices 
     FOR EACH ROW 
     EXECUTE FUNCTION update_updated_at_column();
 
--- Create function to calculate effective token amount
-CREATE OR REPLACE FUNCTION calculate_effective_tokens()
-RETURNS TRIGGER AS $$
-BEGIN
-    -- Calculate effective tokens if not manually set
-    IF NEW.effective_token_amount IS NULL THEN
-        NEW.effective_token_amount := NEW.token_amount + FLOOR(NEW.token_amount * NEW.bonus_percentage / 100);
-    END IF;
-    
-    NEW.updated_at := NOW();
-    RETURN NEW;
-END;
-$$ language 'plpgsql';
+-- Remove unnecessary calculate_effective_tokens since no bonus calculation
 
-CREATE TRIGGER calculate_effective_tokens_trigger
-    BEFORE INSERT OR UPDATE ON packages 
-    FOR EACH ROW 
-    EXECUTE FUNCTION calculate_effective_tokens();
-
+-- Create trigger for user_token_transactions
+DROP TRIGGER IF EXISTS update_user_token_transactions_updated_at ON user_token_transactions;
 CREATE TRIGGER update_user_token_transactions_updated_at 
     BEFORE UPDATE ON user_token_transactions 
     FOR EACH ROW 
@@ -299,37 +285,41 @@ ALTER TABLE package_prices ENABLE ROW LEVEL SECURITY;
 ALTER TABLE user_token_transactions ENABLE ROW LEVEL SECURITY;
 
 -- RLS Policies for packages (public read access for active packages)
+DROP POLICY IF EXISTS "Active packages are viewable by everyone" ON packages;
 CREATE POLICY "Active packages are viewable by everyone" ON packages
     FOR SELECT USING (is_active = true);
 
+DROP POLICY IF EXISTS "Service role can manage packages" ON packages;
 CREATE POLICY "Service role can manage packages" ON packages
     FOR ALL USING (current_setting('role') = 'service_role');
 
 -- RLS Policies for package_prices (public read access for active prices)
+DROP POLICY IF EXISTS "Active package prices are viewable by everyone" ON package_prices;
 CREATE POLICY "Active package prices are viewable by everyone" ON package_prices
     FOR SELECT USING (is_active = true);
 
+DROP POLICY IF EXISTS "Service role can manage package prices" ON package_prices;
 CREATE POLICY "Service role can manage package prices" ON package_prices
     FOR ALL USING (current_setting('role') = 'service_role');
 
 -- RLS Policies for user_token_transactions (users can see their own transactions)
+DROP POLICY IF EXISTS "Users can view own token transactions" ON user_token_transactions;
 CREATE POLICY "Users can view own token transactions" ON user_token_transactions
     FOR SELECT USING (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS "Service role can manage user token transactions" ON user_token_transactions;
 CREATE POLICY "Service role can manage user token transactions" ON user_token_transactions
     FOR ALL USING (current_setting('role') = 'service_role');
 
--- Create comprehensive view for user purchases with package details
+-- Create comprehensive view for user purchases with package details (simplified)
 CREATE OR REPLACE VIEW user_purchases_detailed AS
 SELECT 
     p.*,
     pkg.name as package_name,
     pkg.description as package_description,
-    pkg.token_amount,
-    pkg.bonus_percentage,
-    pkg.effective_token_amount,
     pp.interval_type,
     pp.interval_count,
+    pp.token_amount,
     profiles.username,
     profiles.full_name
 FROM purchases p
@@ -380,65 +370,38 @@ GRANT SELECT ON user_token_balance TO authenticated;
 ALTER VIEW user_purchases_detailed SET (security_invoker = true);
 ALTER VIEW user_token_balance SET (security_invoker = true);
 
--- Insert sample package data (token-based packages with proportional pricing)
-INSERT INTO packages (name, description, stripe_product_id, token_amount, bonus_percentage, features) VALUES
-    ('Starter Pack', '100 tokens - Perfect for trying out the service', 'prod_starter', 100, 0, 
-     '["100 API calls", "Basic features", "Standard support"]'::jsonb),
-    ('Popular Pack', '500 tokens + 5% bonus - Great value for regular users', 'prod_popular', 500, 5, 
-     '["500 API calls", "+5% bonus tokens", "All features", "Priority support"]'::jsonb),
-    ('Pro Pack', '1,000 tokens + 10% bonus - Best for power users', 'prod_pro', 1000, 10, 
-     '["1,000 API calls", "+10% bonus tokens", "All features", "Priority support", "Advanced analytics"]'::jsonb),
-    ('Business Pack', '5,000 tokens + 15% bonus - Perfect for teams', 'prod_business', 5000, 15, 
-     '["5,000 API calls", "+15% bonus tokens", "All features", "24/7 support", "Team management", "Custom integrations"]'::jsonb),
-    ('Enterprise Pack', '25,000 tokens + 20% bonus - For large organizations', 'prod_enterprise', 25000, 20, 
-     '["25,000 API calls", "+20% bonus tokens", "All features", "Dedicated support", "Custom solutions", "SLA guarantee"]'::jsonb),
-    ('Ultimate Pack', '100,000 tokens + 25% bonus - Maximum value', 'prod_ultimate', 100000, 25, 
-     '["100,000 API calls", "+25% bonus tokens", "All features", "White-glove support", "Custom development", "Priority infrastructure"]'::jsonb)
+-- Fix: Convert to single product with multiple prices
+-- First, let's clean up the existing data
+DELETE FROM package_prices;
+DELETE FROM packages;
+
+-- Insert the SINGLE product with the correct Stripe product ID
+INSERT INTO packages (name, description, stripe_product_id, features, is_active, sort_order) VALUES
+    ('Token Packages', 'Flexible token packages with bulk discounts', 'prod_SqniwA0Verdhlk', 
+     '["Flexible token amounts", "Bulk discounts", "All features", "Priority support"]'::jsonb, true, 0)
 ON CONFLICT (stripe_product_id) DO NOTHING;
 
--- Example usage comments:
-
--- Get all packages with their pricing options and token amounts:
--- SELECT p.*, pp.amount_cents, pp.currency, p.token_amount, p.bonus_percentage,
---        CASE WHEN p.effective_token_amount IS NOT NULL 
---             THEN p.effective_token_amount 
---             ELSE p.token_amount + FLOOR(p.token_amount * p.bonus_percentage / 100) 
---        END as total_tokens
--- FROM packages p 
--- LEFT JOIN package_prices pp ON p.id = pp.package_id 
--- WHERE p.is_active = true AND pp.is_active = true;
-
--- Get user's token balance and recent activity:
--- SELECT * FROM user_token_balance WHERE user_id = 'user-uuid-here';
-
--- Get user's purchase history with token details:
--- SELECT * FROM user_purchases_detailed WHERE user_id = 'user-uuid-here' ORDER BY purchased_at DESC;
-
--- Get user's token transaction history:
--- SELECT * FROM user_token_transactions 
--- WHERE user_id = 'user-uuid-here' 
--- ORDER BY created_at DESC LIMIT 50;
-
--- Record a completed purchase with tokens:
--- UPDATE purchases 
--- SET status = 'completed', completed_at = NOW(), stripe_customer_id = 'cus_xxx',
---     package_id = 'pkg-uuid'
--- WHERE stripe_payment_intent_id = 'pi_xxx' AND status = 'pending';
-
--- Check user's current token balance:
--- SELECT tokens_remaining FROM profiles WHERE id = 'user-uuid';
-
--- Consume tokens (for API usage):
--- INSERT INTO user_token_transactions (user_id, transaction_type, token_amount, description)
--- VALUES ('user-uuid', 'usage', -5, 'API call - text generation');
--- UPDATE profiles 
--- SET tokens_remaining = tokens_remaining - 5, tokens_used = tokens_used + 5 
--- WHERE id = 'user-uuid' AND tokens_remaining >= 5;
-
--- Get packages sorted by value (tokens per dollar):
--- SELECT p.*, pp.amount_cents, 
---        CAST(p.token_amount as DECIMAL) / (pp.amount_cents / 100.0) as tokens_per_dollar
--- FROM packages p 
--- JOIN package_prices pp ON p.id = pp.package_id 
--- WHERE p.is_active = true AND pp.is_active = true
--- ORDER BY tokens_per_dollar DESC;
+-- Now insert the 6 different price tiers for this single product
+-- Replace the price IDs with your actual Stripe price IDs
+-- The amounts should match what you see in your app
+INSERT INTO package_prices (package_id, stripe_price_id, amount_cents, currency, interval_type, interval_count, is_active, token_amount) 
+SELECT 
+    packages.id,
+    price_data.stripe_price_id,
+    price_data.amount_cents,
+    'aud',
+    'one_time',
+    1,
+    true,
+    price_data.token_amount
+FROM packages
+CROSS JOIN (VALUES
+    ('price_1Rv67RQdTny8lgOgpa3vAoNV', 149, 100),   -- A$1.49 - 100 tokens
+    ('price_1Rv67RQdTny8lgOgx2CpLumG', 749, 500),   -- A$7.49 - 500 tokens  
+    ('price_1Rv67RQdTny8lgOg3GUHGWpw', 1499, 1000), -- A$14.99 - 1000 tokens
+    ('price_1Rv67RQdTny8lgOg39n1b1oS', 3099, 5000), -- A$30.99 - 5000 tokens
+    ('price_1Rv67RQdTny8lgOgJR7IzIeY', 6299, 25000), -- A$62.99 - 25000 tokens
+    ('price_1Rv67RQdTny8lgOgb2EwXy2v', 15999, 100000) -- A$159.99 - 100000 tokens
+) AS price_data(stripe_price_id, amount_cents, token_amount)
+WHERE packages.stripe_product_id = 'prod_SqniwA0Verdhlk'
+ON CONFLICT (stripe_price_id) DO NOTHING;
