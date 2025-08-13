@@ -1,14 +1,15 @@
 <script lang="ts">
     import { UserIcon } from "lucide-svelte";
+    import { Card, CardContent } from "../ui/card";
 </script>
 
 <!-- Image Section -->
 <div class="mb-16">
-    <div
-        class="w-48 h-48 bg-gradient-to-br from-primary to-secondary rounded-3xl flex items-center justify-center"
-    >
-        <UserIcon class="w-24 h-24 text-white" />
-    </div>
+    <Card class="w-48 h-48 bg-gradient-to-br from-primary to-secondary border-0 shadow-lg">
+        <CardContent class="flex items-center justify-center h-full p-0">
+            <UserIcon class="w-24 h-24 text-white" />
+        </CardContent>
+    </Card>
 </div>
 
 <!-- Text Content -->
