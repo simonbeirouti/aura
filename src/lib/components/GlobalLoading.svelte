@@ -15,7 +15,7 @@
 {#if loadingState.isLoading}
   <!-- Full screen loading overlay -->
   <div 
-    class="fixed inset-0 bg-base-300/90 backdrop-blur-sm z-50 flex items-center justify-center"
+    class="fixed inset-0 bg-background/90 backdrop-blur-sm z-50 flex items-center justify-center"
     role="dialog"
     aria-modal="true"
     aria-labelledby="loading-message"
@@ -29,19 +29,19 @@
       
       <!-- Loading message -->
       <div class="space-y-4">
-        <p id="loading-message" class="text-2xl font-semibold text-base-content">
+        <p id="loading-message" class="text-2xl font-semibold text-foreground">
           {loadingState.message}
         </p>
         
         <!-- Progress bar (if progress is provided) -->
         {#if loadingState.progress !== undefined}
-          <div class="w-80 max-w-full bg-base-200 rounded-full h-3 mx-auto">
+          <div class="w-80 max-w-full bg-muted rounded-full h-3 mx-auto">
             <div 
               class="bg-primary h-3 rounded-full transition-all duration-300 ease-out"
               style="width: {loadingState.progress}%"
             ></div>
           </div>
-          <p class="text-base text-base-content/70">
+          <p class="text-base text-muted-foreground">
             {Math.round(loadingState.progress)}% complete
           </p>
         {/if}
@@ -49,7 +49,7 @@
         <!-- Cancel button (if cancellable) -->
         {#if loadingState.canCancel}
           <button
-            class="btn btn-ghost btn-sm mt-2"
+            class="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 hover:bg-accent hover:text-accent-foreground h-9 px-3 mt-2"
             onclick={handleCancel}
             aria-label="Cancel loading"
           >

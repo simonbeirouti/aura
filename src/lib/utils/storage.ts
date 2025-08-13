@@ -1,4 +1,4 @@
-import { supabase } from '../stores/supabaseAuth';
+import { supabase } from '../stores/unifiedAuth';
 
 export interface UploadResult {
   success: boolean;

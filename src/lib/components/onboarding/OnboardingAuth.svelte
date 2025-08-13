@@ -1,14 +1,18 @@
 <script lang="ts">
     import { createEventDispatcher, onMount, onDestroy } from "svelte";
-    import { authStore } from "../../stores/supabaseAuth";
-    import { toast } from "../../stores/toast";
+    import { centralizedAuth } from "../../stores/unifiedAuth";
+    import { toast } from "svelte-sonner";
+    import { Button } from "../ui/button";
+    import { Input } from "../ui/input";
+    import { Card, CardContent } from "../ui/card";
+    import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
 
     const dispatch = createEventDispatcher();
 
     // Login state
     let email = "";
     let password = "";
-    let isSignUp = true;
+    let authMode = "signup"; // "signup" or "login"
     let loginLoading = false;
     let showPassword = false;
     let initialViewportHeight = 0;
@@ -147,23 +151,23 @@
         loginLoading = true;
 
         try {
-            if (isSignUp) {
-                await authStore.signUp(
+            if (authMode === "signup") {
+                await centralizedAuth.handleSignUp(
                     email.trim(),
                     password.trim(),
                 );
                 toast.success(
                     "Account created successfully! Please check your email to verify your account.",
                 );
-                // Dispatch success event to parent
-                dispatch("authSuccess");
+                // For signup, don't dispatch success immediately - wait for email verification
+                // The unified auth store will handle the state changes when email is confirmed
             } else {
-                await authStore.login(
+                await centralizedAuth.handleLogin(
                     email.trim(),
                     password.trim(),
                 );
                 toast.success("Welcome back!");
-                // Dispatch success event to parent
+                // For login, dispatch success immediately since they're authenticated
                 dispatch("authSuccess");
             }
         } catch (error) {
@@ -268,45 +272,27 @@
 <!-- Full-Screen Login Overlay -->
 <div class="min-h-screen flex flex-col safe-area-inset">
     <!-- Main Content Container with Background Image -->
-    <div
-        class="flex-1 relative overflow-hidden rounded-2xl sm:rounded-3xl mx-3 sm:mx-4 my-3 sm:my-4 shadow-2xl max-h-[70vh] sm:max-h-[75vh]"
-    >
+    <Card class="flex-1 relative overflow-hidden mx-3 sm:mx-4 my-3 sm:my-4 shadow-2xl max-h-[70vh] sm:max-h-[75vh] border-0">
         <!-- Background Image -->
-        <div
-            class="absolute inset-0 bg-gradient-to-b from-slate-900 via-slate-800 to-slate-900"
-        >
+        <div class="absolute inset-0 bg-gradient-to-b from-slate-400 via-slate-700 to-slate-900">
             <!-- Robot silhouette overlay -->
-            <div
-                class="absolute inset-0 bg-cover bg-center opacity-80 robot-bg"
-            ></div>
+            <div class="absolute inset-0 bg-cover bg-center opacity-40" style="background-image: url('/robot.png');"></div>
         </div>
 
         <!-- Content positioned at bottom of image -->
-        <div class="absolute inset-0 flex flex-col justify-end p-4 sm:p-6">
-            <!-- Toggle Buttons -->
+        <CardContent class="absolute inset-0 flex flex-col justify-end p-4 sm:p-6">
+            <!-- Auth Mode Tabs -->
             <div class="flex justify-center mb-4 sm:mb-6">
-                <div
-                    class="flex bg-base-300/80 rounded-xl p-1 w-3/4 sm:w-1/2 max-w-xs"
-                >
-                    <button
-                        onclick={() => (isSignUp = true)}
-                        class="flex-1 py-2 sm:py-2.5 rounded-xl text-center font-semibold text-xs sm:text-sm transition-all"
-                        class:bg-primary={isSignUp}
-                        class:text-primary-content={isSignUp}
-                        class:text-base-content={!isSignUp}
-                    >
-                        Sign Up
-                    </button>
-                    <button
-                        onclick={() => (isSignUp = false)}
-                        class="flex-1 py-2 sm:py-2.5 rounded-xl text-center font-semibold text-xs sm:text-sm transition-all"
-                        class:bg-primary={!isSignUp}
-                        class:text-primary-content={!isSignUp}
-                        class:text-base-content={isSignUp}
-                    >
-                        Log In
-                    </button>
-                </div>
+                <Tabs bind:value={authMode} class="w-3/4 sm:w-1/2 max-w-xs">
+                    <TabsList class="grid w-full grid-cols-2 bg-muted/80">
+                        <TabsTrigger value="signup" class="text-xs sm:text-sm font-semibold">
+                            Sign Up
+                        </TabsTrigger>
+                        <TabsTrigger value="login" class="text-xs sm:text-sm font-semibold">
+                            Log In
+                        </TabsTrigger>
+                    </TabsList>
+                </Tabs>
             </div>
 
             <!-- Form Container -->
@@ -314,11 +300,11 @@
                 <div class="w-full max-w-sm px-2">
                     <!-- Email Input -->
                     <div class="mb-3 sm:mb-4">
-                        <input
+                        <Input
                             type="email"
                             bind:value={email}
                             placeholder="Email"
-                            class="input input-sm sm:input-md w-full bg-base-100/90 border-base-300 rounded-xl text-sm sm:text-base placeholder-base-content/60"
+                            class="rounded-xl text-sm sm:text-base"
                             disabled={loginLoading}
                             onfocus={handleInputFocus}
                             onblur={handleInputBlur}
@@ -327,19 +313,21 @@
 
                     <!-- Password Input -->
                     <div class="mb-4 sm:mb-5 relative">
-                        <input
+                        <Input
                             type={showPassword ? "text" : "password"}
                             bind:value={password}
                             placeholder="Password"
-                            class="input input-sm sm:input-md w-full bg-base-100/90 border-base-300 rounded-xl text-sm sm:text-base placeholder-base-content/60 pr-10 sm:pr-12"
+                            class="rounded-xl text-sm sm:text-base pr-10 sm:pr-12"
                             disabled={loginLoading}
                             onfocus={handleInputFocus}
                             onblur={handleInputBlur}
                         />
-                        <button
+                        <Button
                             type="button"
+                            variant="ghost"
+                            size="sm"
+                            class="absolute right-1 top-1/2 -translate-y-1/2 h-8 w-8 p-0 text-muted-foreground hover:text-foreground"
                             onclick={togglePassword}
-                            class="absolute right-3 sm:right-4 top-1/2 -translate-y-1/2 text-base-content/60 hover:text-base-content"
                         >
                             {#if showPassword}
                                 <svg
@@ -376,41 +364,42 @@
                                     ></path>
                                 </svg>
                             {/if}
-                        </button>
+                        </Button>
                     </div>
 
                     <!-- Auth Button -->
-                    <button
+                    <Button
                         onclick={handleEmailAuth}
                         disabled={loginLoading || !isFormValid}
-                        class="btn btn-primary btn-sm sm:btn-md w-full rounded-xl py-3 sm:py-4 text-sm sm:text-base font-semibold disabled:btn-disabled"
+                        class="w-full py-3 sm:py-4 text-sm sm:text-base font-semibold rounded-xl"
+                        size="lg"
                     >
                         {#if loginLoading}
-                            <span
-                                class="loading loading-spinner loading-sm sm:loading-md"
-                            ></span>
+                            <span class="loading loading-spinner loading-sm sm:loading-md"></span>
                             Loading...
                         {:else}
-                            {isSignUp ? "Sign Up" : "Log In"}
+                            {authMode === "signup" ? "Sign Up" : "Log In"}
                         {/if}
-                    </button>
+                    </Button>
                 </div>
             </div>
-        </div>
-    </div>
+        </CardContent>
+    </Card>
 
     <!-- OR ACCESS WITH - Outside the card -->
     <div class="text-center mt-4 sm:mt-6 mb-4 sm:mb-6">
-        <p class="text-base-content/60 text-xs font-medium tracking-wide">
+        <p class="text-muted-foreground text-xs font-medium tracking-wide">
             OR ACCESS WITH
         </p>
     </div>
 
     <!-- Social Login Buttons - Outside the card -->
     <div class="flex justify-center gap-4 sm:gap-5 mb-4 sm:mb-6 pb-safe">
-        <button
+        <Button
+            variant="outline"
+            size="icon"
             onclick={handleAppleSignIn}
-            class="btn btn-circle bg-base-100 border-base-300 hover:bg-base-200 w-12 h-12 sm:w-14 sm:h-14 shadow-sm"
+            class="rounded-full w-12 h-12 sm:w-14 sm:h-14 shadow-sm"
             aria-label="Sign in with Apple"
         >
             <svg
@@ -422,11 +411,13 @@
                     d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"
                 />
             </svg>
-        </button>
+        </Button>
 
-        <button
+        <Button
+            variant="outline"
+            size="icon"
             onclick={handleFacebookSignIn}
-            class="btn btn-circle bg-base-100 border-base-300 hover:bg-base-200 w-12 h-12 sm:w-14 sm:h-14 shadow-sm"
+            class="rounded-full w-12 h-12 sm:w-14 sm:h-14 shadow-sm"
             aria-label="Sign in with Facebook"
         >
             <svg
@@ -438,11 +429,13 @@
                     d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"
                 />
             </svg>
-        </button>
+        </Button>
 
-        <button
+        <Button
+            variant="outline"
+            size="icon"
             onclick={handleGoogleSignIn}
-            class="btn btn-circle bg-base-100 border-base-300 hover:bg-base-200 w-12 h-12 sm:w-14 sm:h-14 shadow-sm"
+            class="rounded-full w-12 h-12 sm:w-14 sm:h-14 shadow-sm"
             aria-label="Sign in with Google"
         >
             <svg class="w-5 h-5 sm:w-6 sm:h-6" viewBox="0 0 24 24">
@@ -463,6 +456,6 @@
                     d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
                 />
             </svg>
-        </button>
+        </Button>
     </div>
 </div>

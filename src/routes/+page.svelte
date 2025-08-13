@@ -1,33 +1,38 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { CogIcon, PlayIcon } from "lucide-svelte";
-  import AppLayout from "../lib/components/AppLayout.svelte";
-  import OnboardingProfile from "../lib/components/onboarding/OnboardingProfile.svelte";
-  import { authStore } from "../lib/stores/supabaseAuth";
-  import { dataActions, dataStore } from "../lib/stores/dataStore";
-  import { loadingActions } from "../lib/stores/loadingStore";
+  import { CogIcon, PlayIcon, CoinsIcon } from "lucide-svelte";
+  import AppLayout from "$lib/components/AppLayout.svelte";
+  import OnboardingProfile from "$lib/components/onboarding/OnboardingProfile.svelte";
+  import { centralizedAuth } from "$lib/stores/unifiedAuth";
+  import { dataActions, dataStore } from "$lib/stores/dataStore";
+  import { loadingActions } from "$lib/stores/loadingStore";
+
+  import { goto } from "$app/navigation";
+  import { Card, CardContent, CardHeader, CardTitle } from "$lib/components/ui/card";
+  import { Button } from "$lib/components/ui/button";
 
   let needsOnboarding = false;
   let profileChecked = false;
 
   onMount(async () => {
-    // Only check onboarding if user is authenticated
-    if ($authStore.isAuthenticated && $authStore.user) {
-      await checkOnboardingStatus();
+    // Check onboarding status using centralized auth
+    const authState = await centralizedAuth.getState();
+    if (authState.isAuthenticated && authState.user) {
+      await checkOnboardingStatus(authState);
     } else {
       profileChecked = true;
     }
   });
 
-  async function checkOnboardingStatus() {
-    if (!$authStore.user) {
+  async function checkOnboardingStatus(authState: any) {
+    if (!authState.user) {
       profileChecked = true;
       return;
     }
 
     // Check if we already have profile data in the store
     const currentProfile = $dataStore.currentProfile;
-    if (currentProfile && currentProfile.id === $authStore.user.id) {
+    if (currentProfile && currentProfile.id === authState.user.id) {
       // We already have the profile data, no need to load
       needsOnboarding = !currentProfile.onboarding_complete;
       profileChecked = true;
@@ -47,7 +52,7 @@
 
       // Check if profile is now available after initialization
       const storeProfile = $dataStore.currentProfile;
-      if (storeProfile && storeProfile.id === $authStore.user.id) {
+      if (storeProfile && storeProfile.id === authState.user.id) {
         needsOnboarding = !storeProfile.onboarding_complete;
         profileChecked = true;
         return;
@@ -59,7 +64,7 @@
         showedLoading = true;
       }
 
-      const profile = await dataActions.getUserProfile($authStore.user.id, false);
+      const profile = await dataActions.getUserProfile(authState.user.id, false);
       
       // User needs onboarding if they don't have a profile or haven't completed onboarding
       needsOnboarding = !profile || !profile.onboarding_complete;
@@ -89,39 +94,38 @@
   <OnboardingProfile on:complete={handleProfileComplete} />
 {:else}
   <!-- Normal Home Page -->
-  <AppLayout>
-    <div class="hero bg-base-100 rounded-2xl shadow-xl w-full max-w-md">
-      <div class="hero-content text-center py-8 px-6">
-        <div class="max-w-md">
-          <h1 class="text-4xl md:text-5xl font-bold text-primary mb-6">
-            Hello there! 👋
-          </h1>
-          <p class="text-lg text-base-content/80 mb-8">
-            Welcome to Aura! You're successfully authenticated and ready to
-            explore.
-          </p>
-
-          {#if $authStore.user}
-            <div class="bg-base-200 rounded-lg p-4 mb-6">
-              <p class="text-sm text-base-content/60 mb-1">Signed in as</p>
-              <p class="font-medium text-base-content">
-                {$authStore.user.email}
+  <AppLayout maxWidth="max-w-2xl">    
+    <Card class="text-center">
+      <CardHeader>
+        <CardTitle class="text-4xl md:text-5xl font-bold text-primary mb-4">
+          Hello there! 👋
+        </CardTitle>
+        
+        <!-- Username and Token Balance -->
+        {#if $dataStore.currentProfile}
+          <div class="space-y-3 mb-6">
+            <!-- Username -->
+            {#if $dataStore.currentProfile.username}
+              <p class="text-xl text-muted-foreground">
+                @{$dataStore.currentProfile.username}
               </p>
+            {/if}
+            
+            <!-- Token Balance -->
+            <div class="inline-flex items-center gap-2 bg-muted/50 rounded-lg px-4 py-2">
+              <CoinsIcon class="w-5 h-5 text-primary" />
+              <span class="text-lg font-semibold text-foreground">
+                {($dataStore.currentProfile.tokens_remaining || 0).toLocaleString()}
+              </span>
             </div>
-          {/if}
-
-          <div class="space-y-4">
-            <a href="/features" class="btn btn-primary btn-lg w-full">
-              <PlayIcon class="w-5 h-5 mr-2" />
-              Explore Features
-            </a>
-            <a href="/settings" class="btn btn-outline btn-lg w-full">
-              <CogIcon class="w-5 h-5 mr-2" />
-              Settings
-            </a>
           </div>
-        </div>
-      </div>
-    </div>
+        {/if}
+        
+        <p class="text-lg text-muted-foreground">
+          Welcome to Aura! You're successfully authenticated and ready to
+          explore.
+        </p>
+      </CardHeader>
+    </Card>
   </AppLayout>
 {/if}

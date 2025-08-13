@@ -1,7 +1,9 @@
 <script lang="ts">
-  import AppLayout from "../../lib/components/AppLayout.svelte";
+  import AppLayout from "$lib/components/AppLayout.svelte";
   import { goto } from "$app/navigation";
   import { ArrowLeftIcon } from "lucide-svelte";
+  import { Card, CardContent, CardHeader, CardTitle } from "$lib/components/ui/card";
+  import { Badge } from "$lib/components/ui/badge";
 
   function goBack() {
     goto("/");
@@ -20,58 +22,60 @@
     },
   ];
 
-  function getStatusBadge(status: string) {
+  function getStatusVariant(status: string): "default" | "secondary" | "destructive" | "outline" {
     switch (status) {
       case "active":
-        return { class: "badge-success", text: "Active" };
+        return "default";
       case "coming-soon":
-        return { class: "badge-warning", text: "Coming Soon" };
+        return "secondary";
       case "development":
-        return { class: "badge-info", text: "In Development" };
+        return "outline";
       default:
-        return { class: "badge-ghost", text: "Unknown" };
+        return "secondary";
+    }
+  }
+
+  function getStatusText(status: string): string {
+    switch (status) {
+      case "active":
+        return "Active";
+      case "coming-soon":
+        return "Coming Soon";
+      case "development":
+        return "In Development";
+      default:
+        return "Unknown";
     }
   }
 </script>
 
-<AppLayout>
-  <div class="w-full max-w-4xl mx-auto">
-    <!-- Header -->
-    <div class="flex items-center justify-between mb-4">
-      <div class="flex items-center gap-4">
-        <button
-          class="btn btn-ghost btn-sm"
-          onclick={goBack}
-          aria-label="Go back to home page"
-        >
-          <ArrowLeftIcon class="w-4 h-4 mr-1" />
-        </button>
-        <h1 class="text-3xl font-bold text-primary">Features</h1>
-      </div>
-    </div>
+<AppLayout title="Features" showBackButton={true} onBack={goBack} maxWidth="max-w-4xl">
 
     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
       {#each features as feature (feature.id)}
-        <div
-          class="card bg-base-100 shadow-xl hover:shadow-2xl transition-shadow duration-300"
-        >
-          <div class="card-body">
-            <div class="flex items-start justify-between mb-4">
+        <Card class="hover:shadow-lg transition-shadow duration-300">
+          <CardHeader>
+            <div class="flex items-start justify-between">
               <div class="text-4xl">{feature.icon}</div>
-              <div class="badge {getStatusBadge(feature.status).class}">
-                {getStatusBadge(feature.status).text}
-              </div>
+              <Badge variant={getStatusVariant(feature.status)}>
+                {getStatusText(feature.status)}
+              </Badge>
             </div>
-
-            <h2 class="card-title text-lg mb-2">{feature.title}</h2>
-            <p class="text-base-content/70 text-sm mb-4">
+            <CardTitle class="text-lg">{feature.title}</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p class="text-muted-foreground text-sm mb-4">
               {feature.description}
             </p>
-
-            <div class="card-actions justify-between items-center">
-              <div class="badge badge-outline badge-sm">{feature.category}</div>
+            
+            <div class="flex justify-between items-center">
+              <Badge variant="outline" class="text-xs">{feature.category}</Badge>
               <button
-                class="btn btn-primary btn-sm"
+                class="px-3 py-1 text-sm rounded-md transition-colors {
+                  feature.status === 'active' 
+                    ? 'bg-primary text-primary-foreground hover:bg-primary/90' 
+                    : 'bg-secondary text-secondary-foreground hover:bg-secondary/80'
+                }"
                 disabled={feature.status !== "active"}
               >
                 {#if feature.status === "active"}
@@ -81,9 +85,8 @@
                 {/if}
               </button>
             </div>
-          </div>
-        </div>
+          </CardContent>
+        </Card>
       {/each}
     </div>
-  </div>
 </AppLayout>

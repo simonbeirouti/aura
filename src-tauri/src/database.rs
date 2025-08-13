@@ -11,6 +11,18 @@ pub struct Profile {
     pub full_name: Option<String>,
     pub avatar_url: Option<String>,
     pub onboarding_complete: Option<bool>,
+    pub stripe_customer_id: Option<String>,
+    pub subscription_id: Option<String>,
+    pub subscription_status: Option<String>,
+    pub subscription_period_end: Option<i64>,
+    // Token balance fields
+    pub total_tokens: Option<i64>,
+    pub tokens_remaining: Option<i64>,
+    pub tokens_used: Option<i64>,
+    // Purchase tracking fields
+    pub total_purchases: Option<i32>,
+    pub total_spent_cents: Option<i64>,
+    pub last_purchase_at: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -18,6 +30,130 @@ pub struct DatabaseConfig {
     pub database_url: String,
     pub access_token: String,
     pub anon_key: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PaymentMethod {
+    pub id: String,
+    pub user_id: String,
+    pub stripe_customer_id: String,
+    pub stripe_payment_method_id: String,
+    pub card_brand: String,
+    pub card_last4: String,
+    pub card_exp_month: i32,
+    pub card_exp_year: i32,
+    pub is_default: bool,
+    pub is_active: bool,
+    pub created_at: Option<String>,
+    pub updated_at: Option<String>,
+    pub last_used_at: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CreatePaymentMethodRequest {
+    pub user_id: String,
+    pub stripe_customer_id: String,
+    pub stripe_payment_method_id: String,
+    pub card_brand: String,
+    pub card_last4: String,
+    pub card_exp_month: i32,
+    pub card_exp_year: i32,
+    pub is_default: Option<bool>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Purchase {
+    pub id: String,
+    pub user_id: String,
+    pub stripe_payment_intent_id: String,
+    pub stripe_price_id: String,
+    pub stripe_product_id: Option<String>,
+    pub package_id: Option<String>,
+    pub package_price_id: Option<String>,
+    pub amount_paid: i64,
+    pub currency: String,
+    pub tokens_purchased: Option<i64>,
+    pub status: String,
+    pub completed_at: Option<String>,
+    pub created_at: Option<String>,
+    pub updated_at: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct UpdatePaymentMethodRequest {
+    pub payment_method_id: String,
+    pub user_id: String,
+    pub is_default: Option<bool>,
+    pub is_active: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SubscriptionPlan {
+    pub id: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub stripe_product_id: String,
+    pub features: Option<serde_json::Value>,
+    pub is_active: bool,
+    pub sort_order: i32,
+    pub created_at: Option<String>,
+    pub updated_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SubscriptionPrice {
+    pub id: String,
+    pub subscription_plan_id: String,
+    pub stripe_price_id: String,
+    pub amount_cents: i64,
+    pub currency: String,
+    pub interval_type: String,
+    pub interval_count: i32,
+    pub token_amount: i64,
+    pub trial_period_days: i32,
+    pub is_active: bool,
+    pub created_at: Option<String>,
+    pub updated_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SubscriptionPlanWithPrices {
+    pub plan: SubscriptionPlan,
+    pub prices: Vec<SubscriptionPrice>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Package {
+    pub id: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub stripe_product_id: String,
+    pub features: Option<serde_json::Value>,
+    pub is_active: bool,
+    pub sort_order: i32,
+    pub created_at: Option<String>,
+    pub updated_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PackagePrice {
+    pub id: String,
+    pub package_id: String,
+    pub stripe_price_id: String,
+    pub amount_cents: i64,
+    pub currency: String,
+    pub interval_type: String,
+    pub interval_count: i32,
+    pub token_amount: i64,
+    pub is_active: bool,
+    pub created_at: Option<String>,
+    pub updated_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PackageWithPrices {
+    pub package: Package,
+    pub prices: Vec<PackagePrice>,
 }
 
 /// Initialize database connection with authentication
@@ -50,7 +186,7 @@ pub async fn init_database(
 }
 
 /// Get authenticated database connection
-async fn get_authenticated_db(app: &tauri::AppHandle) -> Result<DatabaseConfig, String> {
+pub async fn get_authenticated_db(app: &tauri::AppHandle) -> Result<DatabaseConfig, String> {
     // Get database URL from database store
     let db_store = app.store("database.store").map_err(|e| e.to_string())?;
     let database_url = db_store
@@ -351,4 +487,525 @@ pub async fn get_database_status(app: tauri::AppHandle) -> Result<HashMap<String
     }
 
     Ok(status)
+}
+
+/// Update user subscription status
+#[command]
+pub async fn update_subscription_status(
+    user_id: String,
+    stripe_customer_id: String,
+    subscription_id: String,
+    subscription_status: String,
+    subscription_period_end: i64,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
+    let db_config = get_authenticated_db(&app).await?;
+    let client = reqwest::Client::new();
+    
+    let url = format!("{}/rest/v1/profiles", db_config.database_url);
+    
+    let mut update_data = HashMap::new();
+    update_data.insert("stripe_customer_id", serde_json::json!(stripe_customer_id));
+    update_data.insert("subscription_id", serde_json::json!(subscription_id));
+    update_data.insert("subscription_status", serde_json::json!(subscription_status));
+    update_data.insert("subscription_period_end", serde_json::json!(subscription_period_end));
+    update_data.insert("updated_at", serde_json::json!(chrono::Utc::now().to_rfc3339()));
+    
+    let response = client
+        .patch(&url)
+        .header("Authorization", format!("Bearer {}", db_config.access_token))
+        .header("apikey", &db_config.anon_key)
+        .header("Content-Type", "application/json")
+        .header("Prefer", "return=minimal")
+        .query(&[("id", format!("eq.{}", user_id))])
+        .json(&update_data)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to send subscription update request: {}", e))?;
+    
+    if !response.status().is_success() {
+        let status = response.status();
+        let error_text = response.text().await.unwrap_or_default();
+        return Err(format!("Failed to update subscription status: {} - {}", status, error_text));
+    }
+    
+    Ok(())
+}
+
+/// Store payment method metadata after successful Stripe setup
+#[command]
+pub async fn store_payment_method(
+    user_id: String,
+    stripe_customer_id: String,
+    stripe_payment_method_id: String,
+    card_brand: String,
+    card_last4: String,
+    card_exp_month: i32,
+    card_exp_year: i32,
+    is_default: Option<bool>,
+    app: tauri::AppHandle,
+) -> Result<PaymentMethod, String> {
+    let db_config = get_authenticated_db(&app).await
+        .map_err(|e| format!("Database authentication failed: {}", e))?;
+    
+    let client = reqwest::Client::new();
+    
+    // Check if this is the user's first payment method
+    let existing_methods = get_user_payment_methods(user_id.clone(), app.clone()).await?;
+    let should_be_default = is_default.unwrap_or(false) || existing_methods.is_empty();
+    
+    let url = format!("{}/rest/v1/payment_methods", db_config.database_url);
+    
+    let payload = serde_json::json!({
+        "user_id": user_id,
+        "stripe_customer_id": stripe_customer_id,
+        "stripe_payment_method_id": stripe_payment_method_id,
+        "card_brand": card_brand,
+        "card_last4": card_last4,
+        "card_exp_month": card_exp_month,
+        "card_exp_year": card_exp_year,
+        "is_default": should_be_default,
+        "is_active": true
+    });
+    
+    // If this is set as default, first unset all other defaults for this user
+    if should_be_default {
+        let _ = unset_all_default_payment_methods(user_id.clone(), app.clone()).await;
+    }
+    
+    let response = client
+        .post(&url)
+        .header("Authorization", format!("Bearer {}", db_config.access_token))
+        .header("apikey", &db_config.anon_key)
+        .header("Content-Type", "application/json")
+        .header("Prefer", "return=representation")
+        .json(&payload)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to store payment method: {}", e))?;
+    
+    if !response.status().is_success() {
+        let error_text = response.text().await.unwrap_or_default();
+        return Err(format!("Database error storing payment method: {}", error_text));
+    }
+    
+    let payment_methods: Vec<PaymentMethod> = response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse payment method response: {}", e))?;
+    
+    payment_methods
+        .into_iter()
+        .next()
+        .ok_or_else(|| "No payment method returned from database".to_string())
+}
+
+/// Get user's payment methods from database
+#[command]
+pub async fn get_user_payment_methods(
+    user_id: String,
+    app: tauri::AppHandle,
+) -> Result<Vec<PaymentMethod>, String> {
+    let db_config = get_authenticated_db(&app).await?;
+    let client = reqwest::Client::new();
+    
+    let url = format!("{}/rest/v1/payment_methods", db_config.database_url);
+    
+    let response = client
+        .get(&url)
+        .header("Authorization", format!("Bearer {}", db_config.access_token))
+        .header("apikey", &db_config.anon_key)
+        .query(&[
+            ("user_id", format!("eq.{}", user_id)),
+            ("order", "is_default.desc,created_at.desc".to_string())
+        ])
+        .send()
+        .await
+        .map_err(|e| format!("Failed to fetch payment methods: {}", e))?;
+    
+    if !response.status().is_success() {
+        let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+        return Err(format!("Database error fetching payment methods: {}", error_text));
+    }
+    
+    let payment_methods: Vec<PaymentMethod> = response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse payment methods response: {}", e))?;
+    
+    Ok(payment_methods)
+}
+
+/// Update payment method (e.g., set as default, deactivate)
+#[command]
+pub async fn update_payment_method(
+    payment_method_id: String,
+    user_id: String,
+    is_default: Option<bool>,
+    is_active: Option<bool>,
+    app: tauri::AppHandle,
+) -> Result<PaymentMethod, String> {
+    let db_config = get_authenticated_db(&app).await?;
+    let client = reqwest::Client::new();
+    
+    // If setting as default, first unset all other defaults
+    if is_default == Some(true) {
+        let _ = unset_all_default_payment_methods(user_id.clone(), app.clone()).await;
+    }
+    
+    let url = format!("{}/rest/v1/payment_methods", db_config.database_url);
+    
+    let mut payload = serde_json::json!({});
+    if let Some(default) = is_default {
+        payload["is_default"] = serde_json::Value::Bool(default);
+    }
+    if let Some(active) = is_active {
+        payload["is_active"] = serde_json::Value::Bool(active);
+    }
+    payload["updated_at"] = serde_json::Value::String(chrono::Utc::now().to_rfc3339());
+    
+    let response = client
+        .patch(&url)
+        .header("Authorization", format!("Bearer {}", db_config.access_token))
+        .header("apikey", &db_config.anon_key)
+        .header("Content-Type", "application/json")
+        .header("Prefer", "return=representation")
+        .query(&[
+            ("stripe_payment_method_id", format!("eq.{}", payment_method_id)),
+            ("user_id", format!("eq.{}", user_id))
+        ])
+        .json(&payload)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to update payment method: {}", e))?;
+    
+    if !response.status().is_success() {
+        let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+        return Err(format!("Database error updating payment method: {}", error_text));
+    }
+    
+    let payment_methods: Vec<PaymentMethod> = response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse payment method response: {}", e))?;
+    
+    payment_methods
+        .into_iter()
+        .next()
+        .ok_or_else(|| "No payment method returned from database".to_string())
+}
+
+/// Ensure that if there's only one payment method, it's set as default
+async fn ensure_single_payment_method_is_default(
+    user_id: String,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
+    let payment_methods = get_user_payment_methods(user_id.clone(), app.clone()).await?;
+    
+    // If there's exactly one payment method and it's not default, make it default
+    if payment_methods.len() == 1 {
+        let pm = &payment_methods[0];
+        if !pm.is_default {
+            let _ = update_payment_method(
+                pm.stripe_payment_method_id.clone(),
+                user_id,
+                Some(true), // is_default
+                None,       // is_active (don't change)
+                app,
+            ).await;
+        }
+    }
+    
+    Ok(())
+}
+
+/// Delete payment method (hard delete from database)
+#[command]
+pub async fn delete_payment_method_from_db(
+    payment_method_id: String,
+    user_id: String,
+    app: tauri::AppHandle,
+) -> Result<String, String> {
+    let db_config = get_authenticated_db(&app).await?;
+    let client = reqwest::Client::new();
+    
+    let url = format!("{}/rest/v1/payment_methods", db_config.database_url);
+    
+    let response = client
+        .delete(&url)
+        .header("Authorization", format!("Bearer {}", db_config.access_token))
+        .header("apikey", &db_config.anon_key)
+        .header("Content-Type", "application/json")
+        .query(&[
+            ("stripe_payment_method_id", format!("eq.{}", payment_method_id)),
+            ("user_id", format!("eq.{}", user_id))
+        ])
+        .send()
+        .await
+        .map_err(|e| format!("Failed to delete payment method: {}", e))?;
+    
+    if !response.status().is_success() {
+        let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+        return Err(format!("Database error deleting payment method: {}", error_text));
+    }
+    
+    // After deletion, ensure remaining payment method (if any) is set as default
+    let _ = ensure_single_payment_method_is_default(user_id, app).await;
+    
+    Ok("Payment method deleted successfully".to_string())
+}
+
+/// Mark payment method as used (update last_used_at)
+#[command]
+pub async fn mark_payment_method_used(
+    payment_method_id: String,
+    user_id: String,
+    app: tauri::AppHandle,
+) -> Result<String, String> {
+    let db_config = get_authenticated_db(&app).await?;
+    let client = reqwest::Client::new();
+    
+    let url = format!("{}/rest/v1/payment_methods", db_config.database_url);
+    
+    let payload = serde_json::json!({
+        "last_used_at": chrono::Utc::now().to_rfc3339(),
+        "updated_at": chrono::Utc::now().to_rfc3339()
+    });
+    
+    let response = client
+        .patch(&url)
+        .header("Authorization", format!("Bearer {}", db_config.access_token))
+        .header("apikey", &db_config.anon_key)
+        .header("Content-Type", "application/json")
+        .query(&[
+            ("stripe_payment_method_id", format!("eq.{}", payment_method_id)),
+            ("user_id", format!("eq.{}", user_id))
+        ])
+        .json(&payload)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to mark payment method as used: {}", e))?;
+    
+    if !response.status().is_success() {
+        let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+        return Err(format!("Database error marking payment method as used: {}", error_text));
+    }
+    
+    Ok("Payment method marked as used".to_string())
+}
+
+/// Helper function to unset all default payment methods for a user
+async fn unset_all_default_payment_methods(
+    user_id: String,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
+    let db_config = get_authenticated_db(&app).await?;
+    let client = reqwest::Client::new();
+    
+    let url = format!("{}/rest/v1/payment_methods", db_config.database_url);
+    
+    let payload = serde_json::json!({
+        "is_default": false,
+        "updated_at": chrono::Utc::now().to_rfc3339()
+    });
+    
+    let response = client
+        .patch(&url)
+        .header("Authorization", format!("Bearer {}", db_config.access_token))
+        .header("apikey", &db_config.anon_key)
+        .header("Content-Type", "application/json")
+        .query(&[
+            ("user_id", format!("eq.{}", user_id)),
+            ("is_default", "eq.true".to_string()),
+            ("is_active", "eq.true".to_string())
+        ])
+        .json(&payload)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to unset default payment methods: {}", e))?;
+    
+    if !response.status().is_success() {
+        let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+        return Err(format!("Database error unsetting default payment methods: {}", error_text));
+    }
+    
+    Ok(())
+}
+
+/// Get subscription plans with their associated prices from the database
+#[command]
+pub async fn get_subscription_plans_with_prices(
+    app: tauri::AppHandle,
+) -> Result<Vec<SubscriptionPlanWithPrices>, String> {
+    let db_config = get_authenticated_db(&app).await?;
+    let client = reqwest::Client::new();
+    
+    // Query subscription plans
+    let plans_response = client
+        .get(&format!("{}/rest/v1/subscription_plans?is_active=eq.true&order=sort_order", db_config.database_url))
+        .header("Authorization", format!("Bearer {}", db_config.access_token))
+        .header("apikey", &db_config.anon_key)
+        .header("Content-Type", "application/json")
+        .send()
+        .await
+        .map_err(|e| format!("Failed to query subscription plans: {}", e))?;
+    
+    if !plans_response.status().is_success() {
+        let error_text = plans_response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+        return Err(format!("Database error fetching subscription plans: {}", error_text));
+    }
+    
+    let plans: Vec<SubscriptionPlan> = plans_response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse subscription plans response: {}", e))?;
+    
+    // Query subscription prices
+    let prices_response = client
+        .get(&format!("{}/rest/v1/subscription_prices?is_active=eq.true", db_config.database_url))
+        .header("Authorization", format!("Bearer {}", db_config.access_token))
+        .header("apikey", &db_config.anon_key)
+        .header("Content-Type", "application/json")
+        .send()
+        .await
+        .map_err(|e| format!("Failed to query subscription prices: {}", e))?;
+    
+    if !prices_response.status().is_success() {
+        let error_text = prices_response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+        return Err(format!("Database error fetching subscription prices: {}", error_text));
+    }
+    
+    let prices: Vec<SubscriptionPrice> = prices_response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse subscription prices response: {}", e))?;
+    
+    // Combine plans with their prices
+    let mut result = Vec::new();
+    for plan in plans {
+        let plan_prices: Vec<SubscriptionPrice> = prices
+            .iter()
+            .filter(|price| price.subscription_plan_id == plan.id)
+            .cloned()
+            .collect();
+        
+        result.push(SubscriptionPlanWithPrices {
+            plan,
+            prices: plan_prices,
+        });
+    }
+    
+    Ok(result)
+}
+
+/// Get packages with their associated prices from the database
+#[command]
+pub async fn get_packages_with_prices(
+    app: tauri::AppHandle,
+) -> Result<Vec<PackageWithPrices>, String> {
+    let db_config = get_authenticated_db(&app).await?;
+    let client = reqwest::Client::new();
+    
+    // Query packages
+    let packages_response = client
+        .get(&format!("{}/rest/v1/packages?is_active=eq.true&order=sort_order", db_config.database_url))
+        .header("Authorization", format!("Bearer {}", db_config.access_token))
+        .header("apikey", &db_config.anon_key)
+        .header("Content-Type", "application/json")
+        .send()
+        .await
+        .map_err(|e| format!("Failed to query packages: {}", e))?;
+    
+    if !packages_response.status().is_success() {
+        let error_text = packages_response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+        return Err(format!("Database error fetching packages: {}", error_text));
+    }
+    
+    let packages: Vec<Package> = packages_response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse packages response: {}", e))?;
+    
+    // Query package prices
+    let prices_response = client
+        .get(&format!("{}/rest/v1/package_prices?is_active=eq.true&order=amount_cents.asc", db_config.database_url))
+        .header("Authorization", format!("Bearer {}", db_config.access_token))
+        .header("apikey", &db_config.anon_key)
+        .header("Content-Type", "application/json")
+        .send()
+        .await
+        .map_err(|e| format!("Failed to query package prices: {}", e))?;
+    
+    if !prices_response.status().is_success() {
+        let error_text = prices_response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+        return Err(format!("Database error fetching package prices: {}", error_text));
+    }
+    
+    let prices: Vec<PackagePrice> = prices_response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse package prices response: {}", e))?;
+    
+    // Group prices by package
+    let mut packages_with_prices = Vec::new();
+    for package in packages {
+        let package_prices: Vec<PackagePrice> = prices
+            .iter()
+            .filter(|p| p.package_id == package.id)
+            .cloned()
+            .collect();
+        
+        packages_with_prices.push(PackageWithPrices {
+            package,
+            prices: package_prices,
+        });
+    }
+    
+    Ok(packages_with_prices)
+}
+
+/// Get user's purchase history from database
+#[command]
+pub async fn get_user_purchases(
+    user_id: String,
+    app: tauri::AppHandle,
+) -> Result<Vec<Purchase>, String> {
+    let db_config = get_authenticated_db(&app).await?;
+
+    // Verify user is authenticated by checking if they have a valid session
+    let session_check = crate::session::check_session(app.clone()).await?;
+    if !session_check {
+        return Err("Authentication required".to_string());
+    }
+
+    let client = reqwest::Client::new();
+    
+    let url = format!("{}/rest/v1/purchases", db_config.database_url);
+    
+    let response = client
+        .get(&url)
+        .header("Authorization", format!("Bearer {}", db_config.access_token))
+        .header("apikey", &db_config.anon_key)
+        .query(&[
+            ("user_id", format!("eq.{}", user_id)),
+            ("status", "eq.completed".to_string()),
+            ("order", "completed_at.desc".to_string()),
+            ("select", "id,user_id,stripe_payment_intent_id,stripe_price_id,stripe_product_id,package_id,package_price_id,amount_paid,currency,tokens_purchased,status,completed_at,created_at,updated_at".to_string())
+        ])
+        .send()
+        .await
+        .map_err(|e| format!("Failed to fetch purchases: {}", e))?;
+    
+    let status = response.status();
+    if !status.is_success() {
+        let error_body = response.text().await.unwrap_or_else(|_| "Could not read error body".to_string());
+        return Err(format!("Database query failed: {} - {}", status, error_body));
+    }
+    
+    let purchases: Vec<Purchase> = response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse purchases response: {}", e))?;
+    
+    Ok(purchases)
 }

@@ -1,6 +1,6 @@
 <script lang="ts">
-    import { createEventDispatcher } from "svelte";
-    import { authStore } from "../../stores/supabaseAuth";
+    import { createEventDispatcher, onMount } from "svelte";
+    import { centralizedAuth } from "../../stores/unifiedAuth";
     import { dataStore } from "../../stores/dataStore";
     import {
         uploadAvatar,
@@ -11,6 +11,10 @@
         CameraIcon,
         LoaderIcon,
     } from "lucide-svelte";
+    import { Button } from "../ui/button";
+    import { Input } from "../ui/input";
+    import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../ui/card";
+    import { Badge } from "../ui/badge";
 
     const dispatch = createEventDispatcher();
 
@@ -31,20 +35,44 @@
     // File input reference
     let fileInput: HTMLInputElement;
 
-    // Initialize with user data if available
-    $: if ($authStore.user && !profileData.full_name) {
-        profileData.full_name = $authStore.user.user_metadata?.full_name || "";
-    }
+    // Initialize profile data when component mounts
+    onMount(async () => {
+        if ($centralizedAuth.user) {
+            // Initialize from user metadata if available
+            profileData.full_name = $centralizedAuth.user.user_metadata?.full_name || "";
+            profileData.avatar_url = $centralizedAuth.user.user_metadata?.avatar_url || "";
+            
+            // Try to load existing profile data
+            try {
+                const existingProfile = await dataStore.getUserProfile($centralizedAuth.user.id);
+                if (existingProfile) {
+                    profileData.full_name = existingProfile.full_name || profileData.full_name;
+                    profileData.username = existingProfile.username || "";
+                    profileData.avatar_url = existingProfile.avatar_url || profileData.avatar_url;
+                }
+            } catch (error) {
+                // No existing profile found, will start with fresh data
+            }
+            
+            // Set avatar preview if we have an avatar URL
+            if (profileData.avatar_url) {
+                avatarPreview = profileData.avatar_url;
+            }
+        }
+    });
 
     async function handleAvatarUpload(event: Event) {
         const input = event.target as HTMLInputElement;
         const file = input.files?.[0];
 
-        if (!file || !$authStore.user) return;
+        if (!file || !$centralizedAuth.user) return;
 
         try {
             // Validate file
-            validateImageFile(file);
+            const validation = validateImageFile(file);
+            if (!validation.valid) {
+                throw new Error(validation.error || "Invalid file");
+            }
 
             // Create preview
             avatarPreview = await createFilePreview(file);
@@ -53,15 +81,32 @@
             isUploading = true;
             uploadError = "";
 
-            const result = await uploadAvatar(file, $authStore.user.id);
+            const result = await uploadAvatar(file, $centralizedAuth.user.id);
             if (result.success && result.publicUrl) {
                 profileData.avatar_url = result.publicUrl;
-                avatarPreview = result.publicUrl;
+                
+                // Test if the URL is accessible by trying to load it
+                if (result.publicUrl) {
+                    try {
+                        const img = new Image();
+                        img.onload = () => {
+                            avatarPreview = result.publicUrl!;
+                        };
+                        img.onerror = () => {
+                            // Keep the local preview for now, but try again after a delay
+                            setTimeout(() => {
+                                avatarPreview = result.publicUrl!;
+                            }, 2000);
+                        };
+                        img.src = result.publicUrl;
+                    } catch (imageError) {
+                        // Keep the local preview
+                    }
+                }
             } else {
                 throw new Error(result.error || "Upload failed");
             }
         } catch (error) {
-            console.error("Avatar upload failed:", error);
             uploadError =
                 error instanceof Error
                     ? error.message
@@ -93,7 +138,6 @@
             usernameError = "";
             return true;
         } catch (error) {
-            console.error("Username check failed:", error);
             usernameError = "Failed to check username availability";
             return false;
         }
@@ -121,7 +165,7 @@
     }
 
     async function completeOnboarding(isSkipped = false) {
-        if (!$authStore.user) {
+        if (!$centralizedAuth.user) {
             console.error("No authenticated user found");
             return;
         }
@@ -131,7 +175,7 @@
         try {
             // Create or update user profile
             const profilePayload = {
-                full_name: profileData.full_name || $authStore.user.email || "",
+                full_name: profileData.full_name || $centralizedAuth.user.email || "",
                 username: profileData.username || "",
                 avatar_url: profileData.avatar_url || "",
                 onboarding_complete: true,
@@ -141,15 +185,15 @@
             let existingProfile = null;
             try {
                 existingProfile = await dataStore.getUserProfile(
-                    $authStore.user.id,
+                    $centralizedAuth.user.id,
                 );
             } catch (error) {
-                console.log("No existing profile found, will create new one");
+                // No existing profile found, will create new one
             }
 
             if (existingProfile) {
                 // Update existing profile
-                await dataStore.updateUserProfile($authStore.user.id, {
+                await dataStore.updateUserProfile($centralizedAuth.user.id, {
                     full_name: profilePayload.full_name,
                     username: profilePayload.username,
                     avatar_url: profilePayload.avatar_url,
@@ -157,7 +201,7 @@
                 });
             } else {
                 // Create new profile
-                await dataStore.createUserProfile($authStore.user.id, {
+                await dataStore.createUserProfile($centralizedAuth.user.id, {
                     full_name: profilePayload.full_name,
                     username: profilePayload.username,
                     avatar_url: profilePayload.avatar_url,
@@ -178,7 +222,6 @@
             }, 150);
             
         } catch (error) {
-            console.error("Failed to complete onboarding:", error);
             // Reset view even on error
             resetView();
             
@@ -196,52 +239,51 @@
 </script>
 
 <!-- Profile Setup Layout matching steps 1 & 2 -->
-<div class="min-h-screen bg-base-100 flex flex-col relative">
+<div class="min-h-screen bg-background flex flex-col relative">
     <!-- Main Content Container -->
     <div class="flex-1 flex flex-col justify-between items-center px-8 py-16">
         <!-- Top Section: Profile Form -->
         <div class="flex-1 flex flex-col justify-center items-center max-w-md mx-auto">
-            <div class="text-center">
-                <h2 class="text-3xl font-bold text-base-content mb-6">
-                    Set up your profile
-                </h2>
-                <p class="text-lg text-base-content/80 leading-relaxed mb-8">
-                    Tell us a bit about yourself to personalize your
-                    experience
-                </p>
+            <Card class="w-full max-w-lg border-0 shadow-lg bg-card/50 backdrop-blur-sm">
+                <CardHeader class="text-center pb-6">
+                    <div class="flex justify-center mb-2">
+                        <Badge variant="secondary" class="px-3 py-1">
+                            Final Step
+                        </Badge>
+                    </div>
+                    <CardTitle class="text-3xl font-bold">
+                        Set up your profile
+                    </CardTitle>
+                    <CardDescription class="text-lg leading-relaxed">
+                        Tell us a bit about yourself to personalize your experience
+                    </CardDescription>
+                </CardHeader>
+                <CardContent class="space-y-6">
 
-                <!-- Profile Form -->
-                <div class="space-y-6 max-w-sm mx-auto">
                     <!-- Avatar Upload -->
                     <div class="flex flex-col items-center gap-4">
-                        <button
-                            class="avatar cursor-pointer bg-transparent border-0 p-0 m-4"
+                        <Button
+                            variant="outline"
+                            class="w-32 h-32 rounded-full border-2 border-dashed hover:border-primary transition-colors p-0 overflow-hidden"
                             onclick={triggerFileInput}
                             disabled={isUploading}
                         >
-                            <div
-                                class="w-40 h-40 rounded-full bg-base-200 border-2 border-dashed border-base-300 hover:border-primary transition-colors flex items-center justify-center"
-                            >
-                                {#if avatarPreview}
-                                    <img
-                                        src={avatarPreview}
-                                        alt="Avatar preview"
-                                        class="w-full h-full rounded-full object-cover"
-                                    />
-                                {:else if isUploading}
-                                    <LoaderIcon
-                                        class="w-6 h-6 animate-spin text-primary"
-                                    />
-                                {:else}
-                                    <CameraIcon
-                                        class="w-6 h-6 text-base-content/50"
-                                    />
-                                {/if}
-                            </div>
-                        </button>
-                        <p
-                            class="text-xs text-base-content/50 text-center"
-                        >
+                            {#if avatarPreview}
+                                <img
+                                    src={avatarPreview}
+                                    alt="Avatar preview"
+                                    class="w-full h-full object-cover"
+                                />
+                            {:else if isUploading}
+                                <LoaderIcon class="w-8 h-8 animate-spin text-primary" />
+                            {:else}
+                                <div class="flex flex-col items-center gap-2">
+                                    <CameraIcon class="w-8 h-8 text-muted-foreground" />
+                                    <span class="text-xs text-muted-foreground">Add Photo</span>
+                                </div>
+                            {/if}
+                        </Button>
+                        <p class="text-xs text-muted-foreground text-center">
                             Click to add a profile photo
                         </p>
                     </div>
@@ -258,11 +300,10 @@
                     <!-- Form Fields -->
                     <div class="space-y-4">
                         <!-- Full Name -->
-                        <div class="form-control">
-                            <input
+                        <div class="space-y-2">
+                            <Input
                                 id="full-name-input"
                                 type="text"
-                                class="input input-bordered w-full"
                                 bind:value={profileData.full_name}
                                 placeholder="Enter your full name"
                                 required
@@ -270,57 +311,54 @@
                         </div>
 
                         <!-- Username -->
-                        <div class="form-control">
-                            <input
+                        <div class="space-y-2">
+                            <Input
                                 id="username-input"
                                 type="text"
-                                class="input input-bordered w-full {usernameError
-                                    ? 'input-error'
-                                    : ''}"
                                 bind:value={profileData.username}
                                 placeholder="Choose a username"
                                 onblur={checkUsername}
+                                class={usernameError ? 'border-destructive' : ''}
                                 required
                             />
                             {#if usernameError}
-                                <div class="label">
-                                    <span
-                                        class="label-text-alt text-error"
-                                    >
-                                        {usernameError}
-                                    </span>
+                                <div class="text-sm text-destructive mt-1">
+                                    {usernameError}
                                 </div>
                             {/if}
                         </div>
                     </div>
 
                     {#if uploadError}
-                        <div class="alert alert-error">
-                            <span>{uploadError}</span>
-                        </div>
+                        <Card class="border-destructive bg-destructive/10">
+                            <CardContent class="p-3">
+                                <p class="text-sm text-destructive">{uploadError}</p>
+                            </CardContent>
+                        </Card>
                     {/if}
-                </div>
-            </div>
+                </CardContent>
+            </Card>
         </div>
 
         <!-- Bottom Section: Complete Setup Button (aligned with steps 1-2) -->
         <div class="w-full mx-auto">
             <div class="flex justify-center items-center px-2 pb-12">
-                <button
-                    class="btn btn-primary btn-lg px-8"
+                <Button
                     onclick={() => completeOnboarding(false)}
                     disabled={isSaving ||
                         !profileData.full_name ||
                         !profileData.username ||
                         !!usernameError}
+                    size="lg"
+                    class="px-8"
                 >
                     {#if isSaving}
-                        <LoaderIcon class="w-4 h-4 animate-spin" />
+                        <LoaderIcon class="w-4 h-4 animate-spin mr-2" />
                         Creating...
                     {:else}
                         Complete Setup
                     {/if}
-                </button>
+                </Button>
             </div>
         </div>
     </div>

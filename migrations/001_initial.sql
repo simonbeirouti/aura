@@ -10,6 +10,7 @@ create table profiles (
   user_theme user_theme DEFAULT 'light', 
   full_name text,
   avatar_url text,
+  stripe_customer_id text,  -- Keep as base for Stripe integration
 
   constraint username_length check (char_length(username) >= 3)
 );
