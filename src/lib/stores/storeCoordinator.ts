@@ -76,7 +76,6 @@ class StoreCoordinator {
         stats: { ...s.stats, syncCount: s.stats.syncCount + 1 }
       }));
 
-      console.log('Store coordinator: Initialization complete');
     } catch (error) {
       console.error('Store coordinator: Initialization failed:', error);
       this.addError(`Initialization failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -99,12 +98,6 @@ class StoreCoordinator {
     const profileCached = cacheManager.has(cacheKeys.profile(userId));
     const paymentMethodsCached = cacheManager.has(cacheKeys.paymentMethods(userId));
     const subscriptionCached = cacheManager.has(cacheKeys.subscription(userId));
-
-    console.log('Store coordinator: Cache status:', {
-      profile: profileCached,
-      paymentMethods: paymentMethodsCached,
-      subscription: subscriptionCached
-    });
 
     // Initialize settings store (will use cache if available)
     await settingsActions.initialize();
@@ -161,7 +154,6 @@ class StoreCoordinator {
     }
 
     if (refreshTasks.length > 0) {
-      console.log(`Store coordinator: Smart refresh - updating ${refreshTasks.length} stale caches`);
       await Promise.allSettled(refreshTasks);
       
       this.store.update(s => ({
@@ -200,8 +192,6 @@ class StoreCoordinator {
     if (userId) {
       cacheManager.invalidatePattern(cacheKeys.userPattern(userId));
       settingsActions.clearCache();
-      
-      console.log('Store coordinator: User cache invalidated');
     }
   }
 
@@ -215,8 +205,6 @@ class StoreCoordinator {
     
     // Reset coordinator state
     this.store.set(initialState);
-    
-    console.log('Store coordinator: Logout cleanup complete');
   }
 
   // Setup authentication listener

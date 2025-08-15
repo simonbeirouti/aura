@@ -517,8 +517,6 @@ export const settingsActions = {
     const userId = getCurrentUserId();
     if (!userId) return;
 
-    console.log('Settings store: Handling purchase completion, refreshing profile...');
-
     try {
       // Use cache manager to handle purchase completion cache invalidation
       cacheManager.handlePurchaseCompletion(userId);
@@ -528,8 +526,6 @@ export const settingsActions = {
       
       // Force refresh profile to get updated token balance
       await this.loadProfile(true);
-      
-      console.log('Settings store: Profile and purchases cache refreshed after purchase');
     } catch (error) {
       console.error('Settings store: Failed to refresh profile after purchase:', error);
     }
@@ -544,14 +540,6 @@ export const settingsActions = {
       // Force refresh profile data to get latest token balances
       const profile = await this.loadProfile(true);
       
-      if (profile) {
-        console.log('Settings store: Token balance refreshed:', {
-          total_tokens: profile.total_tokens,
-          tokens_remaining: profile.tokens_remaining,
-          tokens_used: profile.tokens_used
-        });
-      }
-      
       return profile;
     } catch (error) {
       console.error('Settings store: Failed to refresh token balance:', error);
@@ -564,7 +552,6 @@ export const settingsActions = {
     const userId = getCurrentUserId();
     if (userId) {
       cacheManager.delete(cacheKeys.userPurchases(userId));
-      console.log('Settings store: Purchases cache invalidated');
     }
   },
 

@@ -128,8 +128,6 @@ class UnifiedAuthStore {
    * Initialize the entire application authentication and data layer
    */
   async initialize(): Promise<InitializationResult> {
-    console.log('🚀 Starting unified auth initialization...');
-    
     this.store.update(state => ({ 
       ...state, 
       isLoading: true, 
@@ -146,17 +144,14 @@ class UnifiedAuthStore {
     try {
       // Step 1: Initialize core systems
       await storeManager.initialize();
-      console.log('✅ Store manager initialized');
 
       // Step 2: Initialize authentication
-      console.log('🔄 Initializing authentication...');
       const authSuccess = await this.initializeAuth();
       result.authReady = authSuccess;
 
       // Step 4: Load profile if authenticated
       const state = get(this.store);
       if (state.isAuthenticated && state.user) {
-        console.log('🔄 Loading user profile...');
         try {
           await dataActions.initialize();
           const profile = await dataActions.getUserProfile(state.user.id, false);
@@ -167,7 +162,6 @@ class UnifiedAuthStore {
             profileLoaded: true 
           }));
           result.profileReady = !!profile;
-          console.log('✅ Profile loaded:', !!profile);
         } catch (error) {
           console.warn('⚠️ Failed to load profile:', error);
           result.errors.push(`Failed to load profile: ${error}`);
@@ -178,12 +172,10 @@ class UnifiedAuthStore {
       }
 
       // Step 5: Initialize Stripe globally (non-critical for core app functionality)
-      console.log('🔄 Initializing Stripe...');
       try {
         const stripeSuccess = await stripeUtils.init();
         if (stripeSuccess) {
           result.stripeReady = true;
-          console.log('✅ Stripe initialized globally');
           
           // Set user context for Stripe if authenticated
           const currentState = get(this.store);
@@ -194,7 +186,6 @@ class UnifiedAuthStore {
                 currentState.user.email,
                 currentState.user.user_metadata?.full_name || currentState.user.email
               );
-              console.log('✅ Stripe user context set');
             } catch (stripeUserError) {
               console.warn('⚠️ Failed to set Stripe user context:', stripeUserError);
               // Don't fail completely for this
@@ -219,8 +210,6 @@ class UnifiedAuthStore {
         isInitialized: true,
         isLoading: false 
       }));
-
-      console.log('🎉 Unified auth initialization complete!', result);
 
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -476,7 +465,6 @@ class UnifiedAuthStore {
       // Clear Stripe user context first
       try {
         stripeUtils.clearUser();
-        console.log('✅ Stripe user context cleared');
       } catch (stripeError) {
         console.warn('Failed to clear Stripe context:', stripeError);
       }
@@ -539,16 +527,7 @@ class UnifiedAuthStore {
     }
 
     try {
-      console.log('Unified auth: Refreshing profile to get latest token balance...');
       const profile = await dataActions.getUserProfile(state.user.id, true); // Force refresh
-      
-      if (profile) {
-        console.log('Unified auth: Profile refreshed with token balance:', {
-          total_tokens: profile.total_tokens,
-          tokens_remaining: profile.tokens_remaining,
-          tokens_used: profile.tokens_used
-        });
-      }
       
       this.store.update(s => ({ ...s, profile, profileLoaded: true }));
     } catch (error) {

@@ -129,10 +129,6 @@
         return;
       }
 
-      console.log(
-        `🔄 Creating payment intent for customer: ${stripeCustomerId}`,
-      );
-
       // Create payment intent for one-time purchase
       const paymentIntent = await invoke<{
         client_secret: string;
@@ -143,14 +139,9 @@
         customer_id: stripeCustomerId,
       });
 
-      console.log(
-        `✅ Payment intent created: ${paymentIntent.payment_intent_id}`,
-      );
-
       // For now, simulate successful payment and record purchase
       // In a real app, this would happen after Stripe Elements confirms the payment
       try {
-        console.log("🔄 Recording purchase with data:");
         const purchaseData = {
           userId: authState.user.id,
           stripePaymentIntentId: paymentIntent.payment_intent_id,
@@ -158,14 +149,9 @@
           amountPaid: selectedPrice.amount_cents,
           currency: selectedPrice.currency,
         };
-        console.log(
-          "Frontend purchase data:",
-          JSON.stringify(purchaseData, null, 2),
-        );
 
         const recordResult = await invoke("record_purchase", purchaseData);
 
-        console.log("✅ Purchase recording result:", recordResult);
         toast.success("🎉 Purchase completed successfully!");
 
         // Close drawer after successful purchase
@@ -256,9 +242,6 @@
       {#each packagesData as packageData}
         {#if packageData.prices && packageData.prices.length > 0}
           <div class="mb-8">
-            <h2 class="text-xl font-bold mb-4 text-center">
-              {packageData.package.name}
-            </h2>
             <div class="grid grid-cols-2 gap-4 w-full">
               {#each packageData.prices as price (price.id)}
                 <Card

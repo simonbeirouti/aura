@@ -364,8 +364,6 @@ class CacheManager {
 
   // Handle purchase completion - invalidate relevant caches
   handlePurchaseCompletion(userId: string): void {
-    console.log('Cache manager: Handling purchase completion for user:', userId);
-    
     // Invalidate all user-specific data that might change after purchase
     const keysToInvalidate = [
       cacheKeys.profile(userId),
@@ -380,8 +378,6 @@ class CacheManager {
         invalidatedCount++;
       }
     });
-
-    console.log(`Cache manager: Invalidated ${invalidatedCount} cache entries after purchase completion`);
   }
 
   // Destroy cache manager
