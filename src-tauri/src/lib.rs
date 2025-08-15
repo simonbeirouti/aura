@@ -8,6 +8,7 @@ mod enhanced_store;
 mod stripe;
 
 // Import required for environment variable loading
+#[cfg(not(target_os = "ios"))]
 use dotenv;
 
 // Load environment variables with cross-platform handling

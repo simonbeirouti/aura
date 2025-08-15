@@ -94,27 +94,23 @@ fn get_env_var(var_name: &str) -> Result<String, String> {
         return Ok(compile_time_value.to_string());
     }
     
-    // On mobile platforms, provide more helpful error messages
-    #[cfg(target_os = "ios")]
-    {
-        return Err(format!(
+    // Return appropriate error message based on platform
+    if cfg!(target_os = "ios") {
+        Err(format!(
             "{} not found. On iOS, environment variables must be set at build time. \
             Please check your .env file and rebuild the app.",
             var_name
-        ));
-    }
-    
-    #[cfg(target_os = "android")]
-    {
-        return Err(format!(
+        ))
+    } else if cfg!(target_os = "android") {
+        Err(format!(
             "{} not found. On Android, environment variables must be set at build time. \
             Please check your .env file and rebuild the app.",
             var_name
-        ));
+        ))
+    } else {
+        // Default error for other platforms
+        Err(format!("{} environment variable not set", var_name))
     }
-    
-    // Default error for other platforms
-    Err(format!("{} environment variable not set", var_name))
 }
 
 
@@ -172,8 +168,8 @@ pub async fn fix_payment_method_attachments(
         // Check if payment method exists and get its current state
         let payment_method = match stripe::PaymentMethod::retrieve(&client, &pm_id, &[]).await {
             Ok(pm) => pm,
-            Err(e) => {
-
+            Err(_e) => {
+                // Payment method not found, skip to next one
                 continue;
             }
         };
@@ -209,8 +205,8 @@ pub async fn fix_payment_method_attachments(
                         }
                     }
                 },
-                Err(e) => {
-
+                Err(_e) => {
+                    // Failed to attach payment method, continue with next one
                 }
             }
         } else {
@@ -989,14 +985,14 @@ pub async fn store_payment_method_after_setup(
         .await;
     
     match response {
-        Ok(resp) if resp.status().is_success() => {
+        Ok(_resp) if _resp.status().is_success() => {
             // Successfully updated customer ID
         },
-        Ok(resp) => {
-
+        Ok(_resp) => {
+            // Non-success status, but we don't need to handle it specifically
         },
-        Err(e) => {
-
+        Err(_e) => {
+            // Error occurred, but we don't need to handle it specifically
         }
     }
     
