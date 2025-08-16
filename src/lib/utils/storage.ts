@@ -44,13 +44,6 @@ export async function uploadAvatar(
     const fileName = `${userId}-${Date.now()}.${fileExt}`;
     const filePath = `avatars/${fileName}`;
 
-    console.log('Uploading file:', {
-      fileName,
-      filePath,
-      fileSize: file.size,
-      fileType: file.type
-    });
-
     // Upload to Supabase Storage
     const { data, error } = await supabase.storage
       .from('avatars')
@@ -67,14 +60,10 @@ export async function uploadAvatar(
       };
     }
 
-    console.log('Upload successful, data:', data);
-
     // Get public URL
     const { data: { publicUrl } } = supabase.storage
       .from('avatars')
       .getPublicUrl(filePath);
-
-    console.log('Generated public URL:', publicUrl);
 
     // Validate the URL format
     if (!publicUrl || !publicUrl.startsWith('http')) {
@@ -183,7 +172,6 @@ export async function cleanupOldAvatars(userId: string, keepCount: number = 1): 
       return false;
     }
 
-    console.log(`Cleaned up ${filePaths.length} old avatar(s) for user ${userId}`);
     return true;
   } catch (error) {
     console.error('Avatar cleanup failed:', error);

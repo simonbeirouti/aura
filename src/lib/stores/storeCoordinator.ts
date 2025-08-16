@@ -1,6 +1,7 @@
 import { writable, derived, get } from 'svelte/store';
 import { cacheManager, cacheKeys } from './cacheManager';
 import { settingsActions } from './settingsStore';
+import { accountActions } from './accountStore';
 import { centralizedAuth } from './unifiedAuth';
 import { dataActions } from './dataStore';
 import { stripeStore } from './stripeStore';
@@ -76,7 +77,6 @@ class StoreCoordinator {
         stats: { ...s.stats, syncCount: s.stats.syncCount + 1 }
       }));
 
-      console.log('Store coordinator: Initialization complete');
     } catch (error) {
       console.error('Store coordinator: Initialization failed:', error);
       this.addError(`Initialization failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -99,15 +99,13 @@ class StoreCoordinator {
     const profileCached = cacheManager.has(cacheKeys.profile(userId));
     const paymentMethodsCached = cacheManager.has(cacheKeys.paymentMethods(userId));
     const subscriptionCached = cacheManager.has(cacheKeys.subscription(userId));
-
-    console.log('Store coordinator: Cache status:', {
-      profile: profileCached,
-      paymentMethods: paymentMethodsCached,
-      subscription: subscriptionCached
-    });
+    const accountCached = cacheManager.has(cacheKeys.userTokenBalance(userId));
 
     // Initialize settings store (will use cache if available)
     await settingsActions.initialize();
+    
+    // Initialize account store for token balance tracking
+    await accountActions.initialize();
 
     // Initialize Stripe if needed
     const stripeState = get(stripeStore);
@@ -116,13 +114,13 @@ class StoreCoordinator {
     }
 
     // Update cache hit/miss stats
-    this.updateCacheStats(profileCached, paymentMethodsCached, subscriptionCached);
+    this.updateCacheStats(profileCached, paymentMethodsCached, subscriptionCached, accountCached);
   }
 
   // Update cache statistics
-  private updateCacheStats(profileCached: boolean, paymentMethodsCached: boolean, subscriptionCached: boolean): void {
-    const hits = [profileCached, paymentMethodsCached, subscriptionCached].filter(Boolean).length;
-    const misses = 3 - hits;
+  private updateCacheStats(profileCached: boolean, paymentMethodsCached: boolean, subscriptionCached: boolean, accountCached: boolean): void {
+    const hits = [profileCached, paymentMethodsCached, subscriptionCached, accountCached].filter(Boolean).length;
+    const misses = 4 - hits;
 
     this.store.update(s => ({
       ...s,
@@ -155,13 +153,14 @@ class StoreCoordinator {
       refreshTasks.push(settingsActions.loadSubscription(true));
     }
 
-    // Background refresh purchases cache if needed
-    if (!cacheManager.has(cacheKeys.userPurchases(userId))) {
-      refreshTasks.push(settingsActions.refreshPurchasesInBackground());
+    // Check if account balance needs refreshing
+    if (!cacheManager.has(cacheKeys.userTokenBalance(userId))) {
+      refreshTasks.push(accountActions.refreshBalance());
     }
 
+
+
     if (refreshTasks.length > 0) {
-      console.log(`Store coordinator: Smart refresh - updating ${refreshTasks.length} stale caches`);
       await Promise.allSettled(refreshTasks);
       
       this.store.update(s => ({
@@ -177,7 +176,10 @@ class StoreCoordinator {
     this.store.update(s => ({ ...s, syncInProgress: true }));
 
     try {
-      await settingsActions.refreshAll();
+      await Promise.allSettled([
+        settingsActions.refreshAll(),
+        accountActions.refreshBalance()
+      ]);
       
       this.store.update(s => ({
         ...s,
@@ -200,8 +202,7 @@ class StoreCoordinator {
     if (userId) {
       cacheManager.invalidatePattern(cacheKeys.userPattern(userId));
       settingsActions.clearCache();
-      
-      console.log('Store coordinator: User cache invalidated');
+      accountActions.clearCache();
     }
   }
 
@@ -215,8 +216,6 @@ class StoreCoordinator {
     
     // Reset coordinator state
     this.store.set(initialState);
-    
-    console.log('Store coordinator: Logout cleanup complete');
   }
 
   // Setup authentication listener

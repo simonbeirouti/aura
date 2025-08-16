@@ -3,6 +3,7 @@
     import AppLayout from "$lib/components/AppLayout.svelte";
     import { centralizedAuth } from "$lib/stores/unifiedAuth";
     import { settingsActions, profileStore } from "$lib/stores/settingsStore";
+    import { accountActions, tokenBalanceStore } from "$lib/stores/accountStore";
     import { goto } from "$app/navigation";
     import {
         UserIcon,
@@ -17,11 +18,17 @@
     import ModeToggle from "$lib/components/ModeToggle.svelte";
 
     // Reactive profile data from store
-    $: ({ profile, loading: isLoading, error } = $profileStore);
+    $: ({ profile, loading: isProfileLoading, error: profileError } = $profileStore);
+    
+    // Reactive token balance data from dedicated account store
+    $: ({ tokensRemaining, tokensUsed, totalTokens, lastUpdated } = $tokenBalanceStore);
 
     onMount(async () => {
         // Initialize all settings data with smart caching
         await settingsActions.initialize();
+        
+        // Initialize account store for token balance tracking
+        await accountActions.initialize();
     });
 
     function goBack() {
@@ -49,7 +56,7 @@
         <ModeToggle />
     </div>
 
-    {#if isLoading}
+    {#if isProfileLoading}
         <!-- Loading state -->
         <div class="flex justify-center items-center py-12">
             <div class="w-8 h-8 border-4 border-primary/20 border-t-primary rounded-full animate-spin"></div>
@@ -87,7 +94,7 @@
                             <div>
                                 <p class="text-sm text-muted-foreground mb-1">Token Balance</p>
                                 <p class="text-lg text-foreground font-medium">
-                                    {(profile?.tokens_remaining || 0).toLocaleString()}
+                                    {tokensRemaining.toLocaleString()}
                                 </p>
                             </div>
                         </div>

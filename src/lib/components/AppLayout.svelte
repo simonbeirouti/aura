@@ -13,6 +13,7 @@
   {showBackButton} 
   {maxWidth} 
   {padding} 
+  paddingBottom="pb-24"
   {onBack}
 >
   <slot name="header-actions" slot="header-actions" />

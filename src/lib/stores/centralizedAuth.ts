@@ -149,11 +149,6 @@ class CentralizedAuthStore {
         // Safely get current auth state without subscribing to uninitialized store
         authState = await this.safeGetAuthState();
         result.authReady = true;
-        
-        console.log('Auth state after initialization:', { 
-          isAuthenticated: authState.isAuthenticated, 
-          hasUser: !!authState.user 
-        });
       } catch (error) {
         console.warn('Auth initialization failed (likely invalid refresh token):', error);
         
@@ -161,7 +156,6 @@ class CentralizedAuthStore {
         await this.safeLogout();
         authState = { isAuthenticated: false, user: null };
         result.authReady = true;
-        console.log('Auth state reset to unauthenticated after error');
         
         result.errors.push(`Authentication failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
       }

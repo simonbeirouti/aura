@@ -5,6 +5,7 @@
   import OnboardingProfile from "$lib/components/onboarding/OnboardingProfile.svelte";
   import { centralizedAuth } from "$lib/stores/unifiedAuth";
   import { dataActions, dataStore } from "$lib/stores/dataStore";
+  import { accountActions, tokenBalanceStore } from "$lib/stores/accountStore";
   import { loadingActions } from "$lib/stores/loadingStore";
 
   import { goto } from "$app/navigation";
@@ -19,6 +20,8 @@
     const authState = await centralizedAuth.getState();
     if (authState.isAuthenticated && authState.user) {
       await checkOnboardingStatus(authState);
+      // Initialize account store for token balance tracking
+      await accountActions.initialize();
     } else {
       profileChecked = true;
     }
@@ -94,7 +97,8 @@
   <OnboardingProfile on:complete={handleProfileComplete} />
 {:else}
   <!-- Normal Home Page -->
-  <AppLayout maxWidth="max-w-2xl">    
+  <AppLayout maxWidth="max-w-2xl">
+    <div class="flex flex-col gap-4">
     <Card class="text-center">
       <CardHeader>
         <CardTitle class="text-4xl md:text-5xl font-bold text-primary mb-4">
@@ -115,7 +119,11 @@
             <div class="inline-flex items-center gap-2 bg-muted/50 rounded-lg px-4 py-2">
               <CoinsIcon class="w-5 h-5 text-primary" />
               <span class="text-lg font-semibold text-foreground">
-                {($dataStore.currentProfile.tokens_remaining || 0).toLocaleString()}
+                {#if $tokenBalanceStore.lastUpdated}
+                  {($tokenBalanceStore.tokensRemaining).toLocaleString()}
+                {:else}
+                  <div class="w-4 h-4 border-2 border-primary/20 border-t-primary rounded-full animate-spin"></div>
+                {/if}
               </span>
             </div>
           </div>
@@ -127,5 +135,78 @@
         </p>
       </CardHeader>
     </Card>
+    <Card class="text-center">
+      <CardHeader>
+        <CardTitle class="text-4xl md:text-5xl font-bold text-primary mb-4">
+          Hello there! 👋
+        </CardTitle>
+        
+        <!-- Username and Token Balance -->
+        {#if $dataStore.currentProfile}
+          <div class="space-y-3 mb-6">
+            <!-- Username -->
+            {#if $dataStore.currentProfile.username}
+              <p class="text-xl text-muted-foreground">
+                @{$dataStore.currentProfile.username}
+              </p>
+            {/if}
+            
+            <!-- Token Balance -->
+            <div class="inline-flex items-center gap-2 bg-muted/50 rounded-lg px-4 py-2">
+              <CoinsIcon class="w-5 h-5 text-primary" />
+              <span class="text-lg font-semibold text-foreground">
+                {#if $tokenBalanceStore.lastUpdated}
+                  {($tokenBalanceStore.tokensRemaining).toLocaleString()}
+                {:else}
+                  <div class="w-4 h-4 border-2 border-primary/20 border-t-primary rounded-full animate-spin"></div>
+                {/if}
+              </span>
+            </div>
+          </div>
+        {/if}
+        
+        <p class="text-lg text-muted-foreground">
+          Welcome to Aura! You're successfully authenticated and ready to
+          explore.
+        </p>
+      </CardHeader>
+    </Card>
+    <Card class="text-center">
+      <CardHeader>
+        <CardTitle class="text-4xl md:text-5xl font-bold text-primary mb-4">
+          Hello there! 👋
+        </CardTitle>
+        
+        <!-- Username and Token Balance -->
+        {#if $dataStore.currentProfile}
+          <div class="space-y-3 mb-6">
+            <!-- Username -->
+            {#if $dataStore.currentProfile.username}
+              <p class="text-xl text-muted-foreground">
+                @{$dataStore.currentProfile.username}
+              </p>
+            {/if}
+            
+            <!-- Token Balance -->
+            <div class="inline-flex items-center gap-2 bg-muted/50 rounded-lg px-4 py-2">
+              <CoinsIcon class="w-5 h-5 text-primary" />
+              <span class="text-lg font-semibold text-foreground">
+                {#if $tokenBalanceStore.lastUpdated}
+                  {($tokenBalanceStore.tokensRemaining).toLocaleString()}
+                {:else}
+                  <div class="w-4 h-4 border-2 border-primary/20 border-t-primary rounded-full animate-spin"></div>
+                {/if}
+              </span>
+            </div>
+          </div>
+        {/if}
+        
+        <p class="text-lg text-muted-foreground">
+          Welcome to Aura! You're successfully authenticated and ready to
+          explore.
+        </p>
+      </CardHeader>
+    </Card>
+    </div>
   </AppLayout>
 {/if}

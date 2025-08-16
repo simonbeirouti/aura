@@ -8,6 +8,7 @@ mod enhanced_store;
 mod stripe;
 
 // Import required for environment variable loading
+#[cfg(not(target_os = "ios"))]
 use dotenv;
 
 // Load environment variables with cross-platform handling
@@ -109,9 +110,7 @@ pub fn run() {
     load_environment_variables();
     
     tauri::Builder::default()
-        .plugin(tauri_plugin_sql::Builder::default().build())
         .plugin(tauri_plugin_store::Builder::new().build())
-        .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_http::init())
         .invoke_handler(tauri::generate_handler![
             // Session management commands

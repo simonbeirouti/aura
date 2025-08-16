@@ -90,8 +90,6 @@ class StripeStore {
       return;
     }
 
-    console.log(`🔄 Setting Stripe user context for: ${userId}`);
-
     // Get or create customer for this user
     const customerId = await this.getOrCreateCustomer(userId, userEmail, userName);
     
@@ -111,8 +109,6 @@ class StripeStore {
       currentUserId: userId,
       currentCustomerId: customerId
     }));
-
-    console.log(`✅ Stripe user context set: ${userId} -> ${customerId}`);
   }
 
   // Clear user context (on logout)
@@ -129,20 +125,15 @@ class StripeStore {
         priceId: null
       }
     }));
-
-    console.log('🔄 Stripe user context cleared');
   }
 
   // Get or create Stripe customer for user
   private async getOrCreateCustomer(userId: string, userEmail?: string, userName?: string): Promise<string | null> {
-    try {
-      console.log(`🔄 Getting/creating Stripe customer for user: ${userId}`);
-      
+    try {      
       // Check cache first
       const cacheKey = cacheKeys.stripeCustomer(userId);
       const cached = cacheManager.get<string>(cacheKey);
       if (cached) {
-        console.log(`✅ Found cached Stripe customer: ${cached}`);
         return cached;
       }
 
@@ -150,12 +141,10 @@ class StripeStore {
       const currentState = get(this.store);
       if (currentState.customers.has(userId)) {
         const storeCustomerId = currentState.customers.get(userId);
-        console.log(`✅ Found store cached Stripe customer: ${storeCustomerId}`);
         return storeCustomerId;
       }
 
       // Get from backend
-      console.log(`🔄 Calling backend to get_or_create_customer for: ${userId}`);
       const result = await invoke<any>('get_or_create_customer', { 
         email: userEmail || '',
         name: userName || ''
@@ -167,8 +156,6 @@ class StripeStore {
         return null;
       }
 
-      console.log(`✅ Backend returned Stripe customer: ${customerId}`);
-      
       // Cache the result
       cacheManager.set(cacheKey, customerId, 60 * 60 * 1000); // 1 hour
       
@@ -196,7 +183,6 @@ class StripeStore {
     
     // Return early if already initialized and not forcing reload
     if (currentState.isInitialized && !forceReload) {
-      console.log('Stripe already initialized, skipping...');
       return true;
     }
 
@@ -234,7 +220,6 @@ class StripeStore {
         error: null
       }));
 
-      console.log(`✅ Stripe initialized successfully (${environmentMode} mode)`);
       return true;
     } catch (error) {
       console.error('❌ Failed to initialize Stripe:', error);
@@ -262,7 +247,6 @@ class StripeStore {
         customerId
       });
 
-      console.log('Payment intent created:', response);
       return response;
     } catch (error) {
       console.error('Failed to create payment intent:', error);
@@ -282,7 +266,6 @@ class StripeStore {
         name
       });
 
-      console.log('Stripe customer created:', customerId);
       return customerId;
     } catch (error) {
       console.error('Failed to create Stripe customer:', error);
@@ -314,7 +297,6 @@ class StripeStore {
         isLoading: false
       }));
 
-      console.log('Subscription created:', subscription);
       return subscription;
     } catch (error) {
       console.error('Failed to create subscription:', error);
@@ -343,7 +325,6 @@ class StripeStore {
         isLoading: false
       }));
 
-      console.log('Subscription canceled successfully');
     } catch (error) {
       console.error('Failed to cancel subscription:', error);
       const errorMessage = error instanceof Error ? error.message : 'Failed to cancel subscription';
@@ -404,7 +385,6 @@ class StripeStore {
         isLoading: false
       }));
 
-      console.log('Subscription status synced:', subscription);
       return subscription;
     } catch (error) {
       console.error('Failed to sync subscription status:', error);
@@ -423,7 +403,6 @@ class StripeStore {
         userId
       });
 
-      console.log('All subscriptions synced:', result);
       this.store.update(state => ({ ...state, isLoading: false }));
       return result;
     } catch (error) {
@@ -445,7 +424,6 @@ class StripeStore {
         interval
       });
 
-      console.log('Stripe product setup result:', result);
       return result;
     } catch (error) {
       console.error('Failed to setup Stripe product:', error);
