@@ -1,6 +1,7 @@
 import { writable, derived, get } from 'svelte/store';
 import { cacheManager, cacheKeys } from './cacheManager';
 import { settingsActions } from './settingsStore';
+import { accountActions } from './accountStore';
 import { centralizedAuth } from './unifiedAuth';
 import { dataActions } from './dataStore';
 import { stripeStore } from './stripeStore';
@@ -98,9 +99,13 @@ class StoreCoordinator {
     const profileCached = cacheManager.has(cacheKeys.profile(userId));
     const paymentMethodsCached = cacheManager.has(cacheKeys.paymentMethods(userId));
     const subscriptionCached = cacheManager.has(cacheKeys.subscription(userId));
+    const accountCached = cacheManager.has(cacheKeys.userTokenBalance(userId));
 
     // Initialize settings store (will use cache if available)
     await settingsActions.initialize();
+    
+    // Initialize account store for token balance tracking
+    await accountActions.initialize();
 
     // Initialize Stripe if needed
     const stripeState = get(stripeStore);
@@ -109,13 +114,13 @@ class StoreCoordinator {
     }
 
     // Update cache hit/miss stats
-    this.updateCacheStats(profileCached, paymentMethodsCached, subscriptionCached);
+    this.updateCacheStats(profileCached, paymentMethodsCached, subscriptionCached, accountCached);
   }
 
   // Update cache statistics
-  private updateCacheStats(profileCached: boolean, paymentMethodsCached: boolean, subscriptionCached: boolean): void {
-    const hits = [profileCached, paymentMethodsCached, subscriptionCached].filter(Boolean).length;
-    const misses = 3 - hits;
+  private updateCacheStats(profileCached: boolean, paymentMethodsCached: boolean, subscriptionCached: boolean, accountCached: boolean): void {
+    const hits = [profileCached, paymentMethodsCached, subscriptionCached, accountCached].filter(Boolean).length;
+    const misses = 4 - hits;
 
     this.store.update(s => ({
       ...s,
@@ -148,10 +153,12 @@ class StoreCoordinator {
       refreshTasks.push(settingsActions.loadSubscription(true));
     }
 
-    // Background refresh purchases cache if needed
-    if (!cacheManager.has(cacheKeys.userPurchases(userId))) {
-      refreshTasks.push(settingsActions.refreshPurchasesInBackground());
+    // Check if account balance needs refreshing
+    if (!cacheManager.has(cacheKeys.userTokenBalance(userId))) {
+      refreshTasks.push(accountActions.refreshBalance());
     }
+
+
 
     if (refreshTasks.length > 0) {
       await Promise.allSettled(refreshTasks);
@@ -169,7 +176,10 @@ class StoreCoordinator {
     this.store.update(s => ({ ...s, syncInProgress: true }));
 
     try {
-      await settingsActions.refreshAll();
+      await Promise.allSettled([
+        settingsActions.refreshAll(),
+        accountActions.refreshBalance()
+      ]);
       
       this.store.update(s => ({
         ...s,
@@ -192,6 +202,7 @@ class StoreCoordinator {
     if (userId) {
       cacheManager.invalidatePattern(cacheKeys.userPattern(userId));
       settingsActions.clearCache();
+      accountActions.clearCache();
     }
   }
 

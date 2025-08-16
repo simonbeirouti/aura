@@ -530,6 +530,14 @@ class UnifiedAuthStore {
       const profile = await dataActions.getUserProfile(state.user.id, true); // Force refresh
       
       this.store.update(s => ({ ...s, profile, profileLoaded: true }));
+      
+      // Also refresh the account store to keep token balance in sync
+      try {
+        const { accountActions } = await import('./accountStore');
+        await accountActions.refreshBalance();
+      } catch (accountError) {
+        console.warn('Failed to refresh account store:', accountError);
+      }
     } catch (error) {
       console.error('Failed to refresh profile:', error);
     }

@@ -7,7 +7,7 @@
   import { centralizedAuth } from "$lib/stores/unifiedAuth";
   import { stripeStore } from "$lib/stores/stripeStore";
   import { cacheManager, cacheKeys } from "$lib/stores/cacheManager";
-  import { settingsActions } from "$lib/stores/settingsStore";
+  import { accountActions } from "$lib/stores/accountStore";
   import {
     Card,
     CardContent,
@@ -160,7 +160,7 @@
         // Handle purchase completion - refresh profile and token balance
         await Promise.allSettled([
           centralizedAuth.refreshProfile(),
-          settingsActions.handlePurchaseCompletion()
+          accountActions.handlePurchaseCompletion()
         ]);
       } catch (recordError) {
         console.error("❌ Failed to record purchase:", recordError);

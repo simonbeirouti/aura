@@ -5,6 +5,7 @@
   import OnboardingProfile from "$lib/components/onboarding/OnboardingProfile.svelte";
   import { centralizedAuth } from "$lib/stores/unifiedAuth";
   import { dataActions, dataStore } from "$lib/stores/dataStore";
+  import { accountActions, tokenBalanceStore } from "$lib/stores/accountStore";
   import { loadingActions } from "$lib/stores/loadingStore";
 
   import { goto } from "$app/navigation";
@@ -19,6 +20,8 @@
     const authState = await centralizedAuth.getState();
     if (authState.isAuthenticated && authState.user) {
       await checkOnboardingStatus(authState);
+      // Initialize account store for token balance tracking
+      await accountActions.initialize();
     } else {
       profileChecked = true;
     }
@@ -115,7 +118,11 @@
             <div class="inline-flex items-center gap-2 bg-muted/50 rounded-lg px-4 py-2">
               <CoinsIcon class="w-5 h-5 text-primary" />
               <span class="text-lg font-semibold text-foreground">
-                {($dataStore.currentProfile.tokens_remaining || 0).toLocaleString()}
+                {#if $tokenBalanceStore.lastUpdated}
+                  {($tokenBalanceStore.tokensRemaining).toLocaleString()}
+                {:else}
+                  <div class="w-4 h-4 border-2 border-primary/20 border-t-primary rounded-full animate-spin"></div>
+                {/if}
               </span>
             </div>
           </div>

@@ -166,6 +166,16 @@ export const settingsActions = {
         profileError: null
       }));
 
+      // If this was a force refresh, also refresh the account store to keep token balance in sync
+      if (forceRefresh) {
+        try {
+          const { accountActions } = await import('./accountStore');
+          await accountActions.refreshBalance();
+        } catch (accountError) {
+          console.warn('Failed to refresh account store after profile load:', accountError);
+        }
+      }
+
       return profile;
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Failed to load profile';
@@ -199,6 +209,14 @@ export const settingsActions = {
         profile: updatedProfile,
         profileLastFetch: Date.now()
       }));
+      
+      // Also refresh the account store to keep token balance in sync
+      try {
+        const { accountActions } = await import('./accountStore');
+        await accountActions.refreshBalance();
+      } catch (accountError) {
+        console.warn('Failed to refresh account store after profile update:', accountError);
+      }
       
       return updatedProfile;
     } catch (error) {
@@ -438,6 +456,14 @@ export const settingsActions = {
 
       // Also refresh profile to get updated subscription fields
       await this.loadProfile(true);
+      
+      // Also refresh the account store to keep token balance in sync
+      try {
+        const { accountActions } = await import('./accountStore');
+        await accountActions.refreshBalance();
+      } catch (accountError) {
+        console.warn('Failed to refresh account store after subscription sync:', accountError);
+      }
 
       return subscriptionData;
     } catch (error) {
@@ -482,10 +508,18 @@ export const settingsActions = {
     }));
   },
 
-  invalidateProfileCache(): void {
+  async invalidateProfileCache(): Promise<void> {
     const userId = getCurrentUserId();
     if (userId) {
       cacheManager.delete(cacheKeys.profile(userId));
+      
+      // Also invalidate account store cache since it depends on profile data
+      try {
+        const { accountActions } = await import('./accountStore');
+        accountActions.invalidateBalanceCache();
+      } catch (accountError) {
+        console.warn('Failed to invalidate account store cache:', accountError);
+      }
     }
   },
 
@@ -510,70 +544,19 @@ export const settingsActions = {
       this.loadPaymentMethods(true),
       this.loadSubscription(true)
     ]);
-  },
-
-  // Purchase completion hook
-  async handlePurchaseCompletion(): Promise<void> {
-    const userId = getCurrentUserId();
-    if (!userId) return;
-
-    try {
-      // Use cache manager to handle purchase completion cache invalidation
-      cacheManager.handlePurchaseCompletion(userId);
-      
-      // Also explicitly invalidate purchases cache
-      this.invalidatePurchasesCache();
-      
-      // Force refresh profile to get updated token balance
-      await this.loadProfile(true);
-    } catch (error) {
-      console.error('Settings store: Failed to refresh profile after purchase:', error);
-    }
-  },
-
-  // Token balance refresh (specific method for token updates)
-  async refreshTokenBalance(): Promise<Profile | null> {
-    const userId = getCurrentUserId();
-    if (!userId) return null;
-
-    try {
-      // Force refresh profile data to get latest token balances
-      const profile = await this.loadProfile(true);
-      
-      return profile;
-    } catch (error) {
-      console.error('Settings store: Failed to refresh token balance:', error);
-      return null;
-    }
-  },
-
-  // Purchases cache management
-  invalidatePurchasesCache(): void {
-    const userId = getCurrentUserId();
-    if (userId) {
-      cacheManager.delete(cacheKeys.userPurchases(userId));
-    }
-  },
-
-  async refreshPurchasesInBackground(): Promise<void> {
-    const userId = getCurrentUserId();
-    if (!userId) return;
-
-    const cacheKey = cacheKeys.userPurchases(userId);
     
-    // Only refresh if cache is getting stale
-    if (cacheManager.has(cacheKey)) {
-      return; // Still fresh
-    }
-
+    // Also refresh the account store to keep token balance in sync
     try {
-      console.log('Settings store: Background refresh of purchases cache');
-      // This would trigger a background load if the purchases page is loaded
-      // For now, we just log that the cache is stale
-    } catch (error) {
-      console.warn('Settings store: Background purchases refresh failed:', error);
+      const { accountActions } = await import('./accountStore');
+      await accountActions.refreshBalance();
+    } catch (accountError) {
+      console.warn('Failed to refresh account store after full refresh:', accountError);
     }
-  }
+  },
+
+
+
+
 };
 
 // Derived stores for easy access
