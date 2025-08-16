@@ -3,6 +3,7 @@
   export let showBackButton: boolean = false;
   export let maxWidth: string = "max-w-4xl";
   export let padding: string = "p-4";
+  export let paddingBottom: string = "pb-4";
   export let onBack: (() => void) | null = null;
 </script>
 
@@ -46,7 +47,7 @@
     {/if}
 
     <!-- Main Content - ONLY this scrolls if content exceeds available space -->
-    <main class="flex-1 overflow-y-auto pb-4" style="min-height: 0; max-height: 100%;">
+    <main class="flex-1 overflow-y-auto {paddingBottom}" style="min-height: 0; max-height: 100%;">
       <slot />
     </main>
   </div>
