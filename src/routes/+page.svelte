@@ -1,212 +1,288 @@
 <script lang="ts">
-  import { onMount } from "svelte";
-  import { CogIcon, PlayIcon, CoinsIcon } from "lucide-svelte";
-  import AppLayout from "$lib/components/AppLayout.svelte";
-  import OnboardingProfile from "$lib/components/onboarding/OnboardingProfile.svelte";
-  import { centralizedAuth } from "$lib/stores/unifiedAuth";
-  import { dataActions, dataStore } from "$lib/stores/dataStore";
-  import { accountActions, tokenBalanceStore } from "$lib/stores/accountStore";
-  import { loadingActions } from "$lib/stores/loadingStore";
-
-  import { goto } from "$app/navigation";
-  import { Card, CardContent, CardHeader, CardTitle } from "$lib/components/ui/card";
+  import { animate, stagger } from "animejs";
+  import {
+    Card,
+    CardContent,
+    CardHeader,
+    CardTitle,
+  } from "$lib/components/ui/card";
   import { Button } from "$lib/components/ui/button";
+  import AppLayout from "$lib/components/AppLayout.svelte";
 
-  let needsOnboarding = false;
-  let profileChecked = false;
-
-  onMount(async () => {
-    // Check onboarding status using centralized auth
-    const authState = await centralizedAuth.getState();
-    if (authState.isAuthenticated && authState.user) {
-      await checkOnboardingStatus(authState);
-      // Initialize account store for token balance tracking
-      await accountActions.initialize();
-    } else {
-      profileChecked = true;
-    }
-  });
-
-  async function checkOnboardingStatus(authState: any) {
-    if (!authState.user) {
-      profileChecked = true;
-      return;
-    }
-
-    // Check if we already have profile data in the store
-    const currentProfile = $dataStore.currentProfile;
-    if (currentProfile && currentProfile.id === authState.user.id) {
-      // We already have the profile data, no need to load
-      needsOnboarding = !currentProfile.onboarding_complete;
-      profileChecked = true;
-      return;
-    }
-
-    // Only show loading if we actually need to fetch data
-    let showedLoading = false;
-    
-    try {
-      // Initialize data store if needed (this might be quick if already initialized)
-      if (!$dataStore.isInitialized) {
-        loadingActions.showProfile('Initializing...');
-        showedLoading = true;
-        await dataActions.initialize();
-      }
-
-      // Check if profile is now available after initialization
-      const storeProfile = $dataStore.currentProfile;
-      if (storeProfile && storeProfile.id === authState.user.id) {
-        needsOnboarding = !storeProfile.onboarding_complete;
-        profileChecked = true;
-        return;
-      }
-
-      // We need to fetch the profile
-      if (!showedLoading) {
-        loadingActions.showProfile('Loading your profile...');
-        showedLoading = true;
-      }
-
-      const profile = await dataActions.getUserProfile(authState.user.id, false);
-      
-      // User needs onboarding if they don't have a profile or haven't completed onboarding
-      needsOnboarding = !profile || !profile.onboarding_complete;
-    } catch (error) {
-      console.error("Failed to check onboarding status:", error);
-      // If we can't check, assume they need onboarding
-      needsOnboarding = true;
-    } finally {
-      profileChecked = true;
-      if (showedLoading) {
-        loadingActions.hideProfile();
-      }
-    }
+  function playBounceAnimation() {
+    animate(".bounce-target", {
+      translateY: [-20, 0],
+      duration: 600,
+      easing: "easeOutBounce",
+    });
   }
 
-  // Handle profile completion
-  function handleProfileComplete() {
-    needsOnboarding = false;
+  function playRotationAnimation() {
+    animate(".rotate-target", {
+      rotate: "360deg",
+      duration: 1000,
+      easing: "easeInOutQuad",
+    });
+  }
+
+  function playStaggerAnimation() {
+    animate(".stagger-item", {
+      scale: [0, 1],
+      opacity: [0, 1],
+      duration: 600,
+      delay: stagger(100),
+      easing: "easeOutBack",
+    });
+  }
+
+  function playPathAnimation() {
+    animate(".path-target", {
+      translateX: [0, 200],
+      translateY: [0, -100, 0],
+      rotate: [0, 180, 360],
+      duration: 2000,
+      easing: "easeInOutSine",
+      loop: true,
+      direction: "alternate",
+    });
+  }
+
+  function playTimeline() {
+    // Simple, working timeline animation
+    animate(".hero-title", {
+      opacity: [0, 1],
+      scale: [0.75, 1],
+      duration: 1000,
+      easing: "easeOutQuad",
+    });
+
+    animate(".hero-subtitle", {
+      opacity: [0, 1],
+      translateY: [8, 0],
+      duration: 800,
+      delay: 400,
+      easing: "easeOutQuad",
+    });
+
+    // Animate the progress bar
+    animate(".timeline-progress", {
+      width: ["0%", "100%"],
+      duration: 1400, // Slightly longer than the text animations
+      easing: "easeOutQuad",
+    });
   }
 </script>
 
-{#if !profileChecked}
-  <!-- Wait for profile check to complete -->
-  <div></div>
-{:else if needsOnboarding}
-  <!-- Fullscreen Profile Setup -->
-  <OnboardingProfile on:complete={handleProfileComplete} />
-{:else}
-  <!-- Normal Home Page -->
-  <AppLayout maxWidth="max-w-2xl">
-    <div class="flex flex-col gap-4">
-    <Card class="text-center">
+<svelte:head>
+  <title>Anime.js Testing - Aura</title>
+</svelte:head>
+
+<AppLayout maxWidth="max-w-6xl">
+  <!-- Animation Cards Grid -->
+  <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+    <!-- Bounce Card -->
+    <Card
+      class="border-border bg-card text-card-foreground shadow-sm transition-all duration-200 hover:shadow-md"
+    >
       <CardHeader>
-        <CardTitle class="text-4xl md:text-5xl font-bold text-primary mb-4">
-          Hello there! 👋
-        </CardTitle>
-        
-        <!-- Username and Token Balance -->
-        {#if $dataStore.currentProfile}
-          <div class="space-y-3 mb-6">
-            <!-- Username -->
-            {#if $dataStore.currentProfile.username}
-              <p class="text-xl text-muted-foreground">
-                @{$dataStore.currentProfile.username}
-              </p>
-            {/if}
-            
-            <!-- Token Balance -->
-            <div class="inline-flex items-center gap-2 bg-muted/50 rounded-lg px-4 py-2">
-              <CoinsIcon class="w-5 h-5 text-primary" />
-              <span class="text-lg font-semibold text-foreground">
-                {#if $tokenBalanceStore.lastUpdated}
-                  {($tokenBalanceStore.tokensRemaining).toLocaleString()}
-                {:else}
-                  <div class="w-4 h-4 border-2 border-primary/20 border-t-primary rounded-full animate-spin"></div>
-                {/if}
-              </span>
-            </div>
-          </div>
-        {/if}
-        
-        <p class="text-lg text-muted-foreground">
-          Welcome to Aura! You're successfully authenticated and ready to
-          explore.
-        </p>
+        <CardTitle class="text-center">Bounce Effect</CardTitle>
       </CardHeader>
+      <CardContent class="text-center">
+        <div
+          class="bounce-target w-20 h-20 bg-primary rounded-full mx-auto flex items-center justify-center text-primary-foreground text-2xl shadow-lg"
+        >
+          🎯
+        </div>
+        <p class="mt-4 text-sm text-muted-foreground">
+          Click the bounce button to see this element bounce!
+        </p>
+        <Button class="mt-4" onclick={playBounceAnimation}>🎯 Bounce</Button>
+      </CardContent>
     </Card>
-    <Card class="text-center">
+
+    <!-- Rotation Card -->
+    <Card
+      class="border-border bg-card text-card-foreground shadow-sm transition-all duration-200 hover:shadow-md"
+    >
       <CardHeader>
-        <CardTitle class="text-4xl md:text-5xl font-bold text-primary mb-4">
-          Hello there! 👋
-        </CardTitle>
-        
-        <!-- Username and Token Balance -->
-        {#if $dataStore.currentProfile}
-          <div class="space-y-3 mb-6">
-            <!-- Username -->
-            {#if $dataStore.currentProfile.username}
-              <p class="text-xl text-muted-foreground">
-                @{$dataStore.currentProfile.username}
-              </p>
-            {/if}
-            
-            <!-- Token Balance -->
-            <div class="inline-flex items-center gap-2 bg-muted/50 rounded-lg px-4 py-2">
-              <CoinsIcon class="w-5 h-5 text-primary" />
-              <span class="text-lg font-semibold text-foreground">
-                {#if $tokenBalanceStore.lastUpdated}
-                  {($tokenBalanceStore.tokensRemaining).toLocaleString()}
-                {:else}
-                  <div class="w-4 h-4 border-2 border-primary/20 border-t-primary rounded-full animate-spin"></div>
-                {/if}
-              </span>
-            </div>
-          </div>
-        {/if}
-        
-        <p class="text-lg text-muted-foreground">
-          Welcome to Aura! You're successfully authenticated and ready to
-          explore.
-        </p>
+        <CardTitle class="text-center">Rotation</CardTitle>
       </CardHeader>
+      <CardContent class="text-center">
+        <div
+          class="rotate-target w-20 h-20 bg-secondary rounded-lg mx-auto flex items-center justify-center text-secondary-foreground text-2xl shadow-lg"
+        >
+          🔄
+        </div>
+        <p class="mt-4 text-sm text-muted-foreground">
+          Click rotation to spin this element!
+        </p>
+        <Button
+          class="mt-4"
+          variant="secondary"
+          onclick={playRotationAnimation}
+        >
+          🔄 Rotate
+        </Button>
+      </CardContent>
     </Card>
-    <Card class="text-center">
+
+    <!-- Stagger Card -->
+    <Card
+      class="border-border bg-card text-card-foreground shadow-sm transition-all duration-200 hover:shadow-md"
+    >
       <CardHeader>
-        <CardTitle class="text-4xl md:text-5xl font-bold text-primary mb-4">
-          Hello there! 👋
-        </CardTitle>
-        
-        <!-- Username and Token Balance -->
-        {#if $dataStore.currentProfile}
-          <div class="space-y-3 mb-6">
-            <!-- Username -->
-            {#if $dataStore.currentProfile.username}
-              <p class="text-xl text-muted-foreground">
-                @{$dataStore.currentProfile.username}
-              </p>
-            {/if}
-            
-            <!-- Token Balance -->
-            <div class="inline-flex items-center gap-2 bg-muted/50 rounded-lg px-4 py-2">
-              <CoinsIcon class="w-5 h-5 text-primary" />
-              <span class="text-lg font-semibold text-foreground">
-                {#if $tokenBalanceStore.lastUpdated}
-                  {($tokenBalanceStore.tokensRemaining).toLocaleString()}
-                {:else}
-                  <div class="w-4 h-4 border-2 border-primary/20 border-t-primary rounded-full animate-spin"></div>
-                {/if}
-              </span>
-            </div>
-          </div>
-        {/if}
-        
-        <p class="text-lg text-muted-foreground">
-          Welcome to Aura! You're successfully authenticated and ready to
-          explore.
-        </p>
+        <CardTitle class="text-center">Stagger Effect</CardTitle>
       </CardHeader>
+      <CardContent class="text-center">
+        <div class="flex justify-center gap-2">
+          <div
+            class="stagger-item w-8 h-8 bg-accent rounded-full flex items-center justify-center text-accent-foreground text-xs shadow-sm"
+          >
+            1
+          </div>
+          <div
+            class="stagger-item w-8 h-8 bg-accent rounded-full flex items-center justify-center text-accent-foreground text-xs shadow-sm"
+          >
+            2
+          </div>
+          <div
+            class="stagger-item w-8 h-8 bg-accent rounded-full flex items-center justify-center text-accent-foreground text-xs shadow-sm"
+          >
+            3
+          </div>
+          <div
+            class="stagger-item w-8 h-8 bg-accent rounded-full flex items-center justify-center text-accent-foreground text-xs shadow-sm"
+          >
+            4
+          </div>
+        </div>
+        <p class="mt-4 text-sm text-muted-foreground">
+          Watch them appear one by one!
+        </p>
+        <Button class="mt-4" variant="outline" onclick={playStaggerAnimation}>
+          ⚡ Stagger
+        </Button>
+      </CardContent>
     </Card>
-    </div>
-  </AppLayout>
-{/if}
+
+    <!-- Path Animation Card -->
+    <Card
+      class="border-border bg-card text-card-foreground shadow-sm transition-all duration-200 hover:shadow-md"
+    >
+      <CardHeader>
+        <CardTitle class="text-center">Path Animation</CardTitle>
+      </CardHeader>
+      <CardContent class="text-center">
+        <div
+          class="relative h-32 bg-muted rounded-lg overflow-hidden border border-border"
+        >
+          <div
+            class="path-target w-8 h-8 bg-destructive rounded-full absolute top-1/2 left-4 transform -translate-y-1/2 shadow-lg"
+          >
+            🚀
+          </div>
+        </div>
+        <p class="mt-4 text-sm text-muted-foreground">
+          This element follows a custom path!
+        </p>
+        <Button class="mt-4" variant="destructive" onclick={playPathAnimation}>
+          🛤️ Animate Path
+        </Button>
+      </CardContent>
+    </Card>
+
+    <!-- Timeline Card -->
+    <Card
+      class="border-border bg-card text-card-foreground shadow-sm transition-all duration-200 hover:shadow-md"
+    >
+      <CardHeader>
+        <CardTitle class="text-center">Timeline</CardTitle>
+      </CardHeader>
+      <CardContent class="text-center">
+        <div class="space-y-2">
+          <div
+            class="w-full h-3 bg-muted rounded-full overflow-hidden border border-border"
+          >
+            <div
+              class="timeline-progress h-full bg-primary rounded-full"
+              style="width: 0%"
+            ></div>
+          </div>
+        </div>
+        <div
+          class="hero-subtitle opacity-0 translate-y-2 text-sm text-muted-foreground transform transition-all"
+        >
+          Watch the coordinated animation
+        </div>
+        <Button class="mt-4" onclick={playTimeline} variant="outline" size="sm">
+          🎬 Play Timeline
+        </Button>
+      </CardContent>
+    </Card>
+
+    <!-- Interactive Demo Section -->
+    <Card
+      class="border-border bg-card text-card-foreground shadow-sm transition-all duration-200 hover:shadow-md"
+    >
+      <CardHeader>
+        <CardTitle class="text-center">Interactive Demo</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div class="text-center space-y-4">
+          <p class="text-muted-foreground">
+            Try clicking this element to trigger an animation:
+          </p>
+          <Button
+            class="w-24 h-24 mx-auto"
+            variant="outline"
+            onclick={(event) => {
+              if (event.target) {
+                animate(event.target, {
+                  scale: [1, 1.2, 1],
+                  rotate: [0, 10, -10, 0],
+                  duration: 600,
+                  easing: "easeInOutQuad",
+                });
+              }
+            }}
+            onkeydown={(event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                if (event.target) {
+                  animate(event.target, {
+                    scale: [1, 1.2, 1],
+                    rotate: [0, 10, -10, 0],
+                    duration: 600,
+                    easing: "easeInOutQuad",
+                  });
+                }
+              }
+            }}
+            aria-label="Click to trigger animation"
+            type="button"
+          >
+            <div
+              class="w-full h-full flex items-center justify-center text-3xl"
+            >
+              🎮
+            </div>
+          </Button>
+          <p class="text-sm text-muted-foreground">
+            Click to trigger a quick animation!
+          </p>
+        </div>
+      </CardContent>
+    </Card>
+  </div>
+</AppLayout>
+
+<style>
+  /* Custom styles for better animation performance */
+  .bounce-target,
+  .rotate-target,
+  .stagger-item,
+  .path-target,
+  .hero-subtitle {
+    will-change: transform;
+  }
+</style>

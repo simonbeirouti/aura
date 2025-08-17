@@ -1,4 +1,7 @@
 <script lang="ts">
+  import { Button } from "$lib/components/ui/button";
+  import { ArrowLeftIcon } from "lucide-svelte";
+  
   export let title: string = "";
   export let showBackButton: boolean = false;
   export let maxWidth: string = "max-w-4xl";
@@ -15,25 +18,15 @@
       <header class="flex items-center justify-between mb-6" style="flex-shrink: 0;">
         <div class="flex items-center gap-4">
           {#if showBackButton}
-            <button
+            <Button
+              variant="outline"
+              size="icon"
+              class="rounded-full"
               onclick={onBack}
-              class="flex items-center justify-center w-10 h-10 rounded-full bg-muted hover:bg-muted/80 transition-colors"
               aria-label="Go back"
             >
-              <svg
-                class="w-5 h-5"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M15 19l-7-7 7-7"
-                />
-              </svg>
-            </button>
+              <ArrowLeftIcon />
+            </Button>
           {/if}
           {#if title}
             <h1 class="text-2xl font-semibold">{title}</h1>
@@ -54,26 +47,13 @@
 </div>
 
 <style>
-  /* Ensure smooth scrolling */
-  .overflow-y-auto {
-    scroll-behavior: smooth;
-  }
-  
-  /* Custom scrollbar styling */
+  /* Hide scrollbars completely */
   .overflow-y-auto::-webkit-scrollbar {
-    width: 6px;
+    display: none;
   }
   
-  .overflow-y-auto::-webkit-scrollbar-track {
-    background: transparent;
-  }
-  
-  .overflow-y-auto::-webkit-scrollbar-thumb {
-    background: hsl(var(--muted-foreground) / 0.3);
-    border-radius: 3px;
-  }
-  
-  .overflow-y-auto::-webkit-scrollbar-thumb:hover {
-    background: hsl(var(--muted-foreground) / 0.5);
+  .overflow-y-auto {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
   }
 </style>
