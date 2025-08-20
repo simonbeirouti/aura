@@ -183,7 +183,15 @@ pub fn run() {
             stripe::create_missing_package_price,
             stripe::debug_get_product_id_from_price,
             stripe::debug_database_schema,
-            stripe::sync_stripe_prices_to_database
+            stripe::sync_stripe_prices_to_database,
+            // Stripe Connect commands
+            stripe::create_connect_account,
+            stripe::create_account_onboarding_link,
+            stripe::get_connect_account_status,
+            stripe::update_connect_account_kyc,
+            stripe::save_kyc_form_data,
+            stripe::load_kyc_form_data,
+            stripe::get_contractor_status
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

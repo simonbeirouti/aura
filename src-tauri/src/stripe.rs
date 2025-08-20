@@ -20,6 +20,9 @@ use stripe::{
     Customer, PaymentIntent, Subscription, Price, Product, Currency, UpdateSubscription,
     CreateSubscriptionItems, CreatePriceRecurring, CreatePriceRecurringInterval,
     CustomerId, IdOrCreate, ListCustomers, AttachPaymentMethod,
+    // Stripe Connect imports
+    Account, CreateAccount, UpdateAccount, AccountType, AccountBusinessType,
+    AccountId,
 };
 
 
@@ -60,6 +63,60 @@ pub struct ProductWithPrices {
     pub name: String,
     pub description: Option<String>,
     pub prices: Vec<ProductPrice>,
+}
+
+// Stripe Connect response types
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ConnectAccountResponse {
+    pub account_id: String,
+    pub onboarding_url: String,
+    pub requirements_completed: bool,
+    pub charges_enabled: bool,
+    pub payouts_enabled: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ConnectAccountStatus {
+    pub account_id: String,
+    pub charges_enabled: bool,
+    pub payouts_enabled: bool,
+    pub requirements_completed: bool,
+    pub requirements_pending: Vec<String>,
+    pub requirements_eventually_due: Vec<String>,
+    pub requirements_currently_due: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct KycFormData {
+    pub contractor_type: String, // "individual" or "business"
+    pub email: String,
+    pub first_name: Option<String>,
+    pub last_name: Option<String>,
+    pub phone: Option<String>,
+    pub date_of_birth: Option<String>, // YYYY-MM-DD format
+    pub address: Option<KycAddress>,
+    pub business_name: Option<String>,
+    pub business_tax_id: Option<String>,
+    pub business_url: Option<String>,
+    pub business_description: Option<String>,
+    pub tos_acceptance: Option<KycTosAcceptance>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct KycAddress {
+    pub line1: String,
+    pub line2: Option<String>,
+    pub city: String,
+    pub state: String,
+    pub postal_code: String,
+    pub country: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct KycTosAcceptance {
+    pub date: i64,
+    pub ip: String,
+    pub user_agent: String,
 }
 
 // Initialize Stripe client with secret key from environment or manual input
@@ -1742,4 +1799,367 @@ pub async fn sync_stripe_prices_to_database(
     }
     
     Ok(format!("Synced {} prices for package '{}'", synced_count, package_name))
+}
+
+// ============================================================================
+// STRIPE CONNECT FUNCTIONALITY
+// ============================================================================
+
+/// Create a Stripe Connect account for a contractor
+#[tauri::command]
+pub async fn create_connect_account(
+    user_id: String,
+    contractor_type: String, // "individual" or "business"
+    email: String,
+    app: tauri::AppHandle,
+) -> Result<ConnectAccountResponse, String> {
+    let client = get_stripe_client()?;
+    
+    // Determine account type
+    let account_type = match contractor_type.as_str() {
+        "individual" => AccountType::Express,
+        "business" => AccountType::Express,
+        _ => return Err("Invalid contractor type. Must be 'individual' or 'business'".to_string()),
+    };
+    
+    let business_type = match contractor_type.as_str() {
+        "individual" => Some(AccountBusinessType::Individual),
+        "business" => Some(AccountBusinessType::Company),
+        _ => None,
+    };
+    
+    // Create the Connect account
+    let mut create_params = CreateAccount::new();
+    create_params.type_ = Some(account_type);
+    create_params.email = Some(&email);
+    create_params.business_type = business_type;
+    
+    // Set capabilities for Express accounts - Stripe will handle this automatically for Express accounts
+    // We'll skip manual capability setting as it's complex and Express accounts handle this
+    
+    // Skip complex payout settings for now - Stripe Express handles this automatically
+    
+    // Add metadata to link to our user
+    let mut metadata = std::collections::HashMap::new();
+    metadata.insert("user_id".to_string(), user_id.clone());
+    metadata.insert("contractor_type".to_string(), contractor_type.clone());
+    create_params.metadata = Some(metadata);
+    
+    let account = Account::create(&client, create_params)
+        .await
+        .map_err(|e| format!("Failed to create Connect account: {}", e))?;
+    
+    let account_id = account.id.to_string();
+    
+    // Create onboarding link
+    let onboarding_url = create_account_onboarding_link(account_id.clone()).await?;
+    
+    // Store in database
+    store_connect_account_in_db(
+        user_id,
+        account_id.clone(),
+        contractor_type,
+        email,
+        app,
+    ).await?;
+    
+    Ok(ConnectAccountResponse {
+        account_id,
+        onboarding_url,
+        requirements_completed: false,
+        charges_enabled: account.charges_enabled.unwrap_or(false),
+        payouts_enabled: account.payouts_enabled.unwrap_or(false),
+    })
+}
+
+/// Create an account onboarding link for Stripe Connect
+#[tauri::command]
+pub async fn create_account_onboarding_link(
+    account_id: String,
+) -> Result<String, String> {
+    let client = get_stripe_client()?;
+    
+    let account_id = AccountId::from_str(&account_id)
+        .map_err(|e| format!("Invalid account ID: {}", e))?;
+    
+    let mut params = stripe::CreateAccountLink::new(
+        account_id,
+        stripe::AccountLinkType::AccountOnboarding,
+    );
+    
+    // Set return and refresh URLs - these should be your app's URLs
+    params.return_url = Some("https://aura.app/contractor/onboarding/success");
+    params.refresh_url = Some("https://aura.app/contractor/onboarding/refresh");
+    
+    let account_link = stripe::AccountLink::create(&client, params)
+        .await
+        .map_err(|e| format!("Failed to create onboarding link: {}", e))?;
+    
+    Ok(account_link.url)
+}
+
+/// Get Connect account status and requirements
+#[tauri::command]
+pub async fn get_connect_account_status(
+    account_id: String,
+) -> Result<ConnectAccountStatus, String> {
+    let client = get_stripe_client()?;
+    
+    let account_id = AccountId::from_str(&account_id)
+        .map_err(|e| format!("Invalid account ID: {}", e))?;
+    
+    let account = Account::retrieve(&client, &account_id, &[])
+        .await
+        .map_err(|e| format!("Failed to retrieve account: {}", e))?;
+    
+    let requirements = account.requirements.unwrap_or_default();
+    
+    Ok(ConnectAccountStatus {
+        account_id: account.id.to_string(),
+        charges_enabled: account.charges_enabled.unwrap_or(false),
+        payouts_enabled: account.payouts_enabled.unwrap_or(false),
+        requirements_completed: requirements.currently_due.as_ref().map_or(true, |v| v.is_empty()) && 
+                               requirements.eventually_due.as_ref().map_or(true, |v| v.is_empty()),
+        requirements_pending: requirements.pending_verification.unwrap_or_default(),
+        requirements_eventually_due: requirements.eventually_due.unwrap_or_default(),
+        requirements_currently_due: requirements.currently_due.unwrap_or_default(),
+    })
+}
+
+/// Update Connect account with KYC information
+#[tauri::command]
+pub async fn update_connect_account_kyc(
+    account_id: String,
+    kyc_data: KycFormData,
+) -> Result<String, String> {
+    let client = get_stripe_client()?;
+    
+    let account_id = AccountId::from_str(&account_id)
+        .map_err(|e| format!("Invalid account ID: {}", e))?;
+    
+    let mut update_params = UpdateAccount::new();
+    
+    // For now, we'll use the simpler approach of just updating the email
+    // The complex KYC data will be handled through Stripe's onboarding flow
+    update_params.email = Some(&kyc_data.email);
+    
+    // Terms of Service acceptance will be handled through Stripe's onboarding flow
+    
+    Account::update(&client, &account_id, update_params)
+        .await
+        .map_err(|e| format!("Failed to update Connect account: {}", e))?;
+    
+    Ok("Connect account updated successfully".to_string())
+}
+
+/// Store Connect account information in database
+async fn store_connect_account_in_db(
+    user_id: String,
+    account_id: String,
+    contractor_type: String,
+    _email: String,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
+    let db_config = crate::database::get_authenticated_db(&app).await.map_err(|e| {
+        format!("Failed to get database config: {}", e)
+    })?;
+    
+    let http_client = reqwest::Client::new();
+    
+    // First, get the user's profile to get profile_id
+    let profile_response = http_client
+        .get(&format!("{}/rest/v1/profiles", db_config.database_url))
+        .header("Authorization", format!("Bearer {}", db_config.access_token))
+        .header("apikey", &db_config.anon_key)
+        .query(&[("id", format!("eq.{}", user_id))])
+        .send()
+        .await
+        .map_err(|e| format!("Failed to fetch user profile: {}", e))?;
+    
+    if !profile_response.status().is_success() {
+        return Err(format!("Failed to fetch user profile: HTTP {}", profile_response.status()));
+    }
+    
+    let profiles: Vec<crate::database::Profile> = profile_response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse user profile: {}", e))?;
+    
+    let profile = profiles.first().ok_or("User profile not found")?;
+    
+    // Create contractor record
+    let contractor_data = serde_json::json!({
+        "user_id": user_id,
+        "profile_id": profile.id,
+        "contractor_type": contractor_type,
+        "kyc_status": "pending",
+        "stripe_connect_account_id": account_id,
+        "stripe_connect_account_status": "pending",
+        "is_active": true
+    });
+    
+    let response = http_client
+        .post(&format!("{}/rest/v1/contractors", db_config.database_url))
+        .header("Authorization", format!("Bearer {}", db_config.access_token))
+        .header("apikey", &db_config.anon_key)
+        .header("Content-Type", "application/json")
+        .header("Prefer", "return=minimal")
+        .json(&contractor_data)
+        .send()
+        .await
+        .map_err(|e| format!("Database request failed: {}", e))?;
+    
+    if !response.status().is_success() {
+        return Err(format!("Failed to create contractor record: HTTP {}", response.status()));
+    }
+    
+    // Update profile to mark as contractor
+    let profile_update = serde_json::json!({
+        "is_contractor": true,
+        "updated_at": chrono::Utc::now().to_rfc3339()
+    });
+    
+    let profile_response = http_client
+        .patch(&format!("{}/rest/v1/profiles", db_config.database_url))
+        .header("Authorization", format!("Bearer {}", db_config.access_token))
+        .header("apikey", &db_config.anon_key)
+        .header("Content-Type", "application/json")
+        .header("Prefer", "return=minimal")
+        .query(&[("id", format!("eq.{}", user_id))])
+        .json(&profile_update)
+        .send()
+        .await
+        .map_err(|e| format!("Profile update request failed: {}", e))?;
+    
+    if !profile_response.status().is_success() {
+        return Err(format!("Failed to update profile: HTTP {}", profile_response.status()));
+    }
+    
+    Ok(())
+}
+
+/// Save KYC form data for auto-save functionality
+#[tauri::command]
+pub async fn save_kyc_form_data(
+    user_id: String,
+    kyc_data: serde_json::Value,
+    app: tauri::AppHandle,
+) -> Result<String, String> {
+    let db_config = crate::database::get_authenticated_db(&app).await.map_err(|e| {
+        format!("Failed to get database config: {}", e)
+    })?;
+    
+    let http_client = reqwest::Client::new();
+    
+    let form_data = serde_json::json!({
+        "user_id": user_id,
+        "kyc_data": kyc_data,
+        "updated_at": chrono::Utc::now().to_rfc3339()
+    });
+    
+    // Try to update first, then insert if no record exists
+    let update_response = http_client
+        .patch(&format!("{}/rest/v1/contractor_kyc_form_data?user_id=eq.{}", db_config.database_url, user_id))
+        .header("Authorization", format!("Bearer {}", db_config.access_token))
+        .header("apikey", &db_config.anon_key)
+        .header("Content-Type", "application/json")
+        .json(&serde_json::json!({
+            "kyc_data": kyc_data,
+            "updated_at": chrono::Utc::now().to_rfc3339()
+        }))
+        .send()
+        .await
+        .map_err(|e| format!("Database request failed: {}", e))?;
+    
+    // If update succeeded, we're done
+    if update_response.status().is_success() {
+        return Ok("KYC form data updated successfully".to_string());
+    }
+    
+    // If update failed (likely no existing record), try insert
+    let response = http_client
+        .post(&format!("{}/rest/v1/contractor_kyc_form_data", db_config.database_url))
+        .header("Authorization", format!("Bearer {}", db_config.access_token))
+        .header("apikey", &db_config.anon_key)
+        .header("Content-Type", "application/json")
+        .json(&form_data)
+        .send()
+        .await
+        .map_err(|e| format!("Database request failed: {}", e))?;
+    
+    if !response.status().is_success() {
+        return Err(format!("Failed to save KYC form data: HTTP {}", response.status()));
+    }
+    
+    Ok("KYC form data saved successfully".to_string())
+}
+
+/// Load saved KYC form data
+#[tauri::command]
+pub async fn load_kyc_form_data(
+    user_id: String,
+    app: tauri::AppHandle,
+) -> Result<Option<serde_json::Value>, String> {
+    let db_config = crate::database::get_authenticated_db(&app).await.map_err(|e| {
+        format!("Failed to get database config: {}", e)
+    })?;
+    
+    let http_client = reqwest::Client::new();
+    
+    let response = http_client
+        .get(&format!("{}/rest/v1/contractor_kyc_form_data", db_config.database_url))
+        .header("Authorization", format!("Bearer {}", db_config.access_token))
+        .header("apikey", &db_config.anon_key)
+        .query(&[("user_id", format!("eq.{}", user_id))])
+        .send()
+        .await
+        .map_err(|e| format!("Database request failed: {}", e))?;
+    
+    if !response.status().is_success() {
+        return Err(format!("Failed to load KYC form data: HTTP {}", response.status()));
+    }
+    
+    let form_data: Vec<serde_json::Value> = response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse form data: {}", e))?;
+    
+    if let Some(data) = form_data.first() {
+        Ok(data.get("kyc_data").cloned())
+    } else {
+        Ok(None)
+    }
+}
+
+/// Get contractor status for current user
+#[tauri::command]
+pub async fn get_contractor_status(
+    user_id: String,
+    app: tauri::AppHandle,
+) -> Result<Option<serde_json::Value>, String> {
+    let db_config = crate::database::get_authenticated_db(&app).await.map_err(|e| {
+        format!("Failed to get database config: {}", e)
+    })?;
+    
+    let http_client = reqwest::Client::new();
+    
+    let response = http_client
+        .get(&format!("{}/rest/v1/contractor_kyc_status", db_config.database_url))
+        .header("Authorization", format!("Bearer {}", db_config.access_token))
+        .header("apikey", &db_config.anon_key)
+        .query(&[("user_id", format!("eq.{}", user_id))])
+        .send()
+        .await
+        .map_err(|e| format!("Database request failed: {}", e))?;
+    
+    if !response.status().is_success() {
+        return Err(format!("Failed to get contractor status: HTTP {}", response.status()));
+    }
+    
+    let contractor_data: Vec<serde_json::Value> = response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse contractor data: {}", e))?;
+    
+    Ok(contractor_data.first().cloned())
 }

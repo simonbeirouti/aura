@@ -47,6 +47,7 @@
     const navigationItems = [
         { title: "Purchase History", link: "/settings/purchases", icon: HistoryIcon },
         { title: "Subscription", link: "/settings/subscription", icon: CrownIcon },
+        { title: "Become a Contractor", link: "/settings/contractor", icon: UserIcon },
         { title: "Payment methods", link: "/settings/payment-methods", icon: CreditCardIcon }
     ];
 </script>

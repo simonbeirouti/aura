@@ -423,7 +423,12 @@ export const cacheKeys = {
   // Purchase-related cache keys
   userTokenBalance: (userId: string) => `token_balance:${userId}`,
   userPurchases: (userId: string) => `purchases:${userId}`,
-  packages: () => 'packages_with_prices'
+  packages: () => 'packages_with_prices',
+  // KYC and contractor-related cache keys
+  contractorStatus: (userId: string) => `contractor_status:${userId}`,
+  kycFormData: (userId: string) => `kyc_form_data:${userId}`,
+  connectAccountStatus: (accountId: string) => `connect_account_status:${accountId}`,
+  onboardingUrl: (accountId: string) => `onboarding_url:${accountId}`
 };
 
 // Cleanup on app close
