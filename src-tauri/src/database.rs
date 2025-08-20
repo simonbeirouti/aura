@@ -100,6 +100,57 @@ pub struct SubscriptionPlan {
     pub updated_at: Option<String>,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ContractorKycFormData {
+    #[serde(rename = "contractorType", alias = "contractor_type")]
+    pub contractor_type: String,
+    pub email: String,
+    #[serde(rename = "firstName", alias = "first_name")]
+    pub first_name: Option<String>,
+    #[serde(rename = "lastName", alias = "last_name")]
+    pub last_name: Option<String>,
+    pub phone: Option<String>,
+    #[serde(rename = "dateOfBirth", alias = "date_of_birth")]
+    pub date_of_birth: Option<String>,
+    pub address: Option<ContractorAddress>,
+    #[serde(rename = "businessName", alias = "business_name")]
+    pub business_name: Option<String>,
+    #[serde(rename = "businessTaxId", alias = "business_tax_id")]
+    pub business_tax_id: Option<String>,
+    #[serde(rename = "businessUrl", alias = "business_url")]
+    pub business_url: Option<String>,
+    #[serde(rename = "businessDescription", alias = "business_description")]
+    pub business_description: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ContractorAddress {
+    pub line1: String,
+    pub line2: Option<String>,
+    pub city: String,
+    pub state: String,
+    #[serde(rename = "postalCode", alias = "postal_code")]
+    pub postal_code: String,
+    pub country: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Contractor {
+    pub id: String,
+    pub user_id: String,
+    pub profile_id: String,
+    pub contractor_type: String,
+    pub kyc_status: String,
+    pub is_active: bool,
+    pub stripe_connect_account_id: Option<String>,
+    pub stripe_connect_account_status: Option<String>,
+    pub stripe_connect_requirements_completed: Option<bool>,
+    pub business_name: Option<String>,
+    pub business_tax_id: Option<String>,
+    pub created_at: Option<String>,
+    pub updated_at: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SubscriptionPrice {
     pub id: String,
@@ -1008,4 +1059,243 @@ pub async fn get_user_purchases(
         .map_err(|e| format!("Failed to parse purchases response: {}", e))?;
     
     Ok(purchases)
+}
+
+/// Save contractor KYC form data for auto-save functionality
+#[command]
+pub async fn save_kyc_form_data(
+    user_id: String,
+    kyc_data: ContractorKycFormData,
+    app: tauri::AppHandle,
+) -> Result<String, String> {
+    let db_config = get_authenticated_db(&app).await?;
+
+    // Verify user is authenticated
+    let session_check = crate::session::check_session(app.clone()).await?;
+    if !session_check {
+        return Err("User not authenticated".to_string());
+    }
+
+    let client = reqwest::Client::new();
+    
+    // Convert form data to JSON
+    let kyc_json = serde_json::to_value(&kyc_data)
+        .map_err(|e| format!("Failed to serialize KYC data: {}", e))?;
+
+    // Upsert KYC form data
+    let response = client
+        .post(&format!("{}/rest/v1/contractor_kyc_form_data", db_config.database_url))
+        .header("Authorization", format!("Bearer {}", db_config.access_token))
+        .header("apikey", &db_config.anon_key)
+        .header("Content-Type", "application/json")
+        .header("Prefer", "resolution=merge-duplicates")
+        .json(&serde_json::json!({
+            "user_id": user_id,
+            "kyc_data": kyc_json
+        }))
+        .send()
+        .await
+        .map_err(|e| format!("Failed to save KYC form data: {}", e))?;
+
+    if !response.status().is_success() {
+        let error_text = response.text().await.unwrap_or_default();
+        return Err(format!("Database error: {}", error_text));
+    }
+
+    Ok("KYC form data saved successfully".to_string())
+}
+
+/// Load contractor KYC form data
+#[command]
+pub async fn load_kyc_form_data(
+    user_id: String,
+    app: tauri::AppHandle,
+) -> Result<Option<ContractorKycFormData>, String> {
+    let db_config = get_authenticated_db(&app).await?;
+
+    // Verify user is authenticated
+    let session_check = crate::session::check_session(app.clone()).await?;
+    if !session_check {
+        return Err("User not authenticated".to_string());
+    }
+
+    let client = reqwest::Client::new();
+    
+    let response = client
+        .get(&format!("{}/rest/v1/contractor_kyc_form_data", db_config.database_url))
+        .header("Authorization", format!("Bearer {}", db_config.access_token))
+        .header("apikey", &db_config.anon_key)
+        .query(&[("user_id", format!("eq.{}", user_id))])
+        .query(&[("select", "kyc_data")])
+        .send()
+        .await
+        .map_err(|e| format!("Failed to load KYC form data: {}", e))?;
+
+    if !response.status().is_success() {
+        let error_text = response.text().await.unwrap_or_default();
+        return Err(format!("Database error: {}", error_text));
+    }
+
+    let form_data_records: Vec<serde_json::Value> = response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse KYC form data response: {}", e))?;
+
+    if let Some(record) = form_data_records.first() {
+        if let Some(kyc_data) = record.get("kyc_data") {
+            let form_data: ContractorKycFormData = serde_json::from_value(kyc_data.clone())
+                .map_err(|e| format!("Failed to deserialize KYC data: {}", e))?;
+            return Ok(Some(form_data));
+        }
+    }
+
+    Ok(None)
+}
+
+/// Create contractor profile and Stripe Connect account
+#[command]
+pub async fn create_contractor_profile(
+    user_id: String,
+    kyc_data: ContractorKycFormData,
+    app: tauri::AppHandle,
+) -> Result<Contractor, String> {
+    let db_config = get_authenticated_db(&app).await?;
+
+    // Verify user is authenticated
+    let session_check = crate::session::check_session(app.clone()).await?;
+    if !session_check {
+        return Err("User not authenticated".to_string());
+    }
+
+    // Get user profile to link contractor
+    let profile = get_user_profile(user_id.clone(), app.clone()).await?
+        .ok_or("User profile not found")?;
+
+    // Create Stripe Connect account
+    let connect_response = crate::stripe::create_connect_account(
+        user_id.clone(),
+        kyc_data.contractor_type.clone(),
+        kyc_data.email.clone(),
+        app.clone(),
+    ).await?;
+
+    let client = reqwest::Client::new();
+    
+    // Create contractor record
+    let contractor_data = serde_json::json!({
+        "user_id": user_id,
+        "profile_id": profile.id,
+        "contractor_type": kyc_data.contractor_type,
+        "kyc_status": "submitted",
+        "is_active": true,
+        "stripe_connect_account_id": connect_response.account_id,
+        "stripe_connect_account_status": "pending",
+        "stripe_connect_requirements_completed": connect_response.requirements_completed,
+        "business_name": kyc_data.business_name,
+        "business_tax_id": kyc_data.business_tax_id
+    });
+
+    let response = client
+        .post(&format!("{}/rest/v1/contractors", db_config.database_url))
+        .header("Authorization", format!("Bearer {}", db_config.access_token))
+        .header("apikey", &db_config.anon_key)
+        .header("Content-Type", "application/json")
+        .header("Prefer", "return=representation")
+        .json(&contractor_data)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to create contractor: {}", e))?;
+
+    if !response.status().is_success() {
+        let error_text = response.text().await.unwrap_or_default();
+        return Err(format!("Database error: {}", error_text));
+    }
+
+    let contractors: Vec<Contractor> = response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse contractor response: {}", e))?;
+
+    let contractor = contractors.into_iter().next()
+        .ok_or("Failed to create contractor")?;
+
+    // Create contractor address record
+    if let Some(address) = kyc_data.address {
+        let address_data = serde_json::json!({
+            "contractor_id": contractor.id,
+            "address_type": "residential",
+            "street_address": address.line1,
+            "street_address_2": address.line2,
+            "city": address.city,
+            "state_province": address.state,
+            "postal_code": address.postal_code,
+            "country": address.country,
+            "is_verified": false
+        });
+
+        let _address_response = client
+            .post(&format!("{}/rest/v1/contractor_addresses", db_config.database_url))
+            .header("Authorization", format!("Bearer {}", db_config.access_token))
+            .header("apikey", &db_config.anon_key)
+            .header("Content-Type", "application/json")
+            .json(&address_data)
+            .send()
+            .await
+            .map_err(|e| format!("Failed to create contractor address: {}", e))?;
+    }
+
+    // Update profile to mark as contractor
+    let _profile_update = client
+        .patch(&format!("{}/rest/v1/profiles", db_config.database_url))
+        .header("Authorization", format!("Bearer {}", db_config.access_token))
+        .header("apikey", &db_config.anon_key)
+        .header("Content-Type", "application/json")
+        .query(&[("id", format!("eq.{}", profile.id))])
+        .json(&serde_json::json!({
+            "is_contractor": true,
+            "contractor_id": contractor.id
+        }))
+        .send()
+        .await
+        .map_err(|e| format!("Failed to update profile: {}", e))?;
+
+    Ok(contractor)
+}
+
+/// Get contractor profile for user
+#[command]
+pub async fn get_contractor_profile(
+    user_id: String,
+    app: tauri::AppHandle,
+) -> Result<Option<Contractor>, String> {
+    let db_config = get_authenticated_db(&app).await?;
+
+    // Verify user is authenticated
+    let session_check = crate::session::check_session(app.clone()).await?;
+    if !session_check {
+        return Err("User not authenticated".to_string());
+    }
+
+    let client = reqwest::Client::new();
+    
+    let response = client
+        .get(&format!("{}/rest/v1/contractors", db_config.database_url))
+        .header("Authorization", format!("Bearer {}", db_config.access_token))
+        .header("apikey", &db_config.anon_key)
+        .query(&[("user_id", format!("eq.{}", user_id))])
+        .send()
+        .await
+        .map_err(|e| format!("Failed to get contractor profile: {}", e))?;
+
+    if !response.status().is_success() {
+        let error_text = response.text().await.unwrap_or_default();
+        return Err(format!("Database error: {}", error_text));
+    }
+
+    let contractors: Vec<Contractor> = response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse contractor response: {}", e))?;
+
+    Ok(contractors.into_iter().next())
 }

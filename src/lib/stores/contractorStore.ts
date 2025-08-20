@@ -79,6 +79,9 @@ const initialState: ContractorState = {
 
 function createContractorStore() {
   const { subscribe, set, update } = writable<ContractorState>(initialState);
+  
+  // Debounced save timeout
+  let saveTimeoutId: NodeJS.Timeout;
 
   return {
     subscribe,
@@ -111,22 +114,30 @@ function createContractorStore() {
         update(state => {
           const newFormData = { ...state.formData };
           
-          // Pre-populate with user data if form fields are empty
-          if (userData?.email && !newFormData.email) {
-            newFormData.email = userData.email;
+          // Pre-populate email from session (auth system has the email)
+          if (currentSession.user?.email && !newFormData.email) {
+            newFormData.email = currentSession.user.email;
           }
-          if (userData?.first_name && !newFormData.firstName) {
-            newFormData.firstName = userData.first_name;
-          }
-          if (userData?.last_name && !newFormData.lastName) {
-            newFormData.lastName = userData.last_name;
-          }
-          if (userData?.phone && !newFormData.phone) {
-            newFormData.phone = userData.phone;
+          
+          // Pre-populate other fields from profile if available
+          if (userData?.full_name && !newFormData.firstName && !newFormData.lastName) {
+            // Try to split full_name into first and last name
+            const nameParts = userData.full_name.split(' ');
+            if (nameParts.length >= 2) {
+              newFormData.firstName = nameParts[0];
+              newFormData.lastName = nameParts.slice(1).join(' ');
+            } else {
+              newFormData.firstName = userData.full_name;
+            }
           }
 
-          // Override with saved form data if available
-          const finalFormData = savedData ? { ...newFormData, ...savedData } : newFormData;
+          // Prioritize saved data over profile data, but ensure email is always present
+          let finalFormData = savedData ? { ...newFormData, ...savedData } : newFormData;
+          
+          // Ensure email is always populated from session if not in saved data
+          if (!finalFormData.email && currentSession.user?.email) {
+            finalFormData.email = currentSession.user.email;
+          }
           
           return {
             ...state,
@@ -147,15 +158,28 @@ function createContractorStore() {
       }
     },
 
-    // Update form data and auto-save
-    async updateFormData(newFormData: Partial<ContractorFormData>) {
-      update(state => ({
-        ...state,
-        formData: { ...state.formData, ...newFormData }
-      }));
+    // Update form data immediately for reactivity
+    updateFormData(newFormData: Partial<ContractorFormData>) {
+      update(state => {
+        const updatedState = {
+          ...state,
+          formData: { ...state.formData, ...newFormData }
+        };
+        return updatedState;
+      });
       
-      // Auto-save after a delay
-      setTimeout(() => this.saveFormData(), 2000);
+      // Immediate save for critical fields, debounced for others
+      const criticalFields = ['email', 'contractorType', 'firstName', 'lastName', 'businessName'];
+      const fieldName = Object.keys(newFormData)[0];
+      
+      if (criticalFields.includes(fieldName)) {
+        // Save immediately for critical fields
+        this.saveFormData();
+      } else {
+        // Debounced save for non-critical fields
+        clearTimeout(saveTimeoutId);
+        saveTimeoutId = setTimeout(() => this.saveFormData(), 1000);
+      }
     },
 
     // Save form data to backend
@@ -174,14 +198,20 @@ function createContractorStore() {
           currentFormData = state.formData;
         });
         unsubscribeStore();
-
+        
         await invoke<string>("save_kyc_form_data", {
           userId: currentSession.user.id,
           kycData: currentFormData,
         });
 
+
       } catch (error) {
-        console.warn("Failed to save contractor form data:", error);
+        console.error("❌ Failed to save contractor form data:", error);
+        // Update store to show save error to user
+        update(state => ({ 
+          ...state, 
+          error: `Failed to save form data: ${error}. Your progress may be lost.` 
+        }));
       }
     },
 

@@ -130,6 +130,11 @@ pub fn run() {
             database::get_subscription_plans_with_prices,
             database::get_packages_with_prices,
             database::get_user_purchases,
+            // Contractor KYC database commands
+            database::save_kyc_form_data,
+            database::load_kyc_form_data,
+            database::create_contractor_profile,
+            database::get_contractor_profile,
             // Payment method database commands
             database::store_payment_method,
             database::get_user_payment_methods,
@@ -189,8 +194,6 @@ pub fn run() {
             stripe::create_account_onboarding_link,
             stripe::get_connect_account_status,
             stripe::update_connect_account_kyc,
-            stripe::save_kyc_form_data,
-            stripe::load_kyc_form_data,
             stripe::get_contractor_status
         ])
         .run(tauri::generate_context!())

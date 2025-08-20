@@ -1,12 +1,14 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { animate } from "animejs";
+  import { invoke } from "@tauri-apps/api/core";
   import {
     contractorStore,
     step1Valid,
     step2Valid,
     step3Valid,
   } from "$lib/stores/contractorStore";
+  import { sessionStore } from "$lib/stores/sessionStore";
   import { Button } from "$lib/components/ui/button";
   import { Input } from "$lib/components/ui/input";
   import { Label } from "$lib/components/ui/label";
@@ -85,7 +87,10 @@
   onMount(async () => {
     // Initialize contractor store
     await contractorStore.initialize();
-
+    
+    // Check if contractor account already exists
+    await checkExistingContractor();
+    
     // Initialize date picker value if dateOfBirth exists
     if (formData.dateOfBirth && !dobValue) {
       try {
@@ -96,13 +101,128 @@
     }
   });
 
-  function createConnectAccount() {
-    // Connect account functionality will be implemented here
+  async function createConnectAccount() {
+    contractorStore.setLoading(true);
+    contractorStore.clearMessages();
+    
+    try {
+      // Get current session
+      let currentSession: any;
+      const unsubscribe = sessionStore.subscribe((state: any) => {
+        currentSession = state;
+      });
+      unsubscribe();
+      
+      if (!currentSession?.isAuthenticated || !currentSession.user?.id) {
+        contractorStore.setError("Not authenticated");
+        return;
+      }
+
+      // Convert form data to match backend structure
+      const kycData = {
+        contractorType: formData.contractorType,
+        email: formData.email,
+        firstName: formData.contractorType === "individual" ? formData.firstName : null,
+        lastName: formData.contractorType === "individual" ? formData.lastName : null,
+        phone: formData.contractorType === "individual" ? formData.phone : null,
+        dateOfBirth: formData.contractorType === "individual" ? formData.dateOfBirth : null,
+        address: {
+          line1: formData.address.line1,
+          line2: formData.address.line2 || null,
+          city: formData.address.city,
+          state: formData.address.state,
+          postalCode: formData.address.postalCode,
+          country: formData.address.country,
+        },
+        businessName: formData.contractorType === "business" ? formData.businessName : null,
+        businessTaxId: formData.contractorType === "business" ? formData.businessTaxId : null,
+        businessUrl: formData.contractorType === "business" ? formData.businessUrl : null,
+        businessDescription: formData.contractorType === "business" ? formData.businessDescription : null,
+      };
+
+      // Create contractor profile and Stripe Connect account
+      const contractor = await invoke<any>("create_contractor_profile", {
+        userId: currentSession.user.id,
+        kycData: kycData,
+      });
+
+      // Update local state
+      connectAccountId = contractor.stripe_connect_account_id;
+      requirementsCompleted = contractor.stripe_connect_requirements_completed || false;
+      
+      // Set success message
+      contractorStore.setSuccess("Contractor account created successfully! Please complete Stripe onboarding to start earning.");
+      
+      // Clear saved form data since we've successfully submitted
+      await invoke("save_kyc_form_data", {
+        userId: currentSession.user.id,
+        kycData: {},
+      });
+
+    } catch (error) {
+      console.error("Failed to create contractor account:", error);
+      contractorStore.setError(`Failed to create contractor account: ${error}`);
+    } finally {
+      contractorStore.setLoading(false);
+    }
   }
 
-  function openStripeOnboarding() {
-    if (onboardingUrl) {
-      window.open(onboardingUrl, "_blank");
+  async function openStripeOnboarding() {
+    if (!connectAccountId) {
+      contractorStore.setError("No Stripe Connect account found");
+      return;
+    }
+
+    try {
+      contractorStore.setLoading(true);
+      
+      // Get onboarding URL from backend
+      const response = await invoke<string>("create_account_onboarding_link", {
+        accountId: connectAccountId,
+      });
+      
+      // Open Stripe onboarding in new tab
+      window.open(response, "_blank");
+      
+    } catch (error) {
+      console.error("Failed to get onboarding URL:", error);
+      contractorStore.setError(`Failed to open Stripe onboarding: ${error}`);
+    } finally {
+      contractorStore.setLoading(false);
+    }
+  }
+
+  async function checkExistingContractor() {
+    try {
+      // Get current session
+      let currentSession: any;
+      const unsubscribe = sessionStore.subscribe((state: any) => {
+        currentSession = state;
+      });
+      unsubscribe();
+      
+      if (!currentSession?.isAuthenticated || !currentSession.user?.id) {
+        return;
+      }
+
+      // Check if contractor profile already exists
+      const contractor = await invoke<any>("get_contractor_profile", {
+        userId: currentSession.user.id,
+      });
+
+      if (contractor) {
+        connectAccountId = contractor.stripe_connect_account_id;
+        requirementsCompleted = contractor.stripe_connect_requirements_completed || false;
+        
+        // If contractor exists but requirements not completed, show appropriate state
+        if (connectAccountId && !requirementsCompleted) {
+          contractorStore.setSuccess("Contractor account found. Please complete Stripe onboarding to start earning.");
+        } else if (requirementsCompleted) {
+          contractorStore.setSuccess("Contractor onboarding completed! You can now start earning on our platform.");
+        }
+      }
+    } catch (error) {
+      console.warn("Could not check existing contractor:", error);
     }
   }
 
@@ -144,6 +264,73 @@
     if (target) {
       updateAddressField(field, target.value);
     }
+  }
+
+  // Reactive handlers for immediate updates
+  function handleEmailInput(event: Event) {
+    const target = event.target as HTMLInputElement;
+    formData.email = target.value;
+    contractorStore.updateFormData({ email: target.value });
+  }
+
+  function handleFirstNameInput(event: Event) {
+    const target = event.target as HTMLInputElement;
+    formData.firstName = target.value;
+    contractorStore.updateFormData({ firstName: target.value });
+  }
+
+  function handleLastNameInput(event: Event) {
+    const target = event.target as HTMLInputElement;
+    formData.lastName = target.value;
+    contractorStore.updateFormData({ lastName: target.value });
+  }
+
+  function handlePhoneInput(event: Event) {
+    const target = event.target as HTMLInputElement;
+    formData.phone = target.value;
+    contractorStore.updateFormData({ phone: target.value });
+  }
+
+  function handleBusinessNameInput(event: Event) {
+    const target = event.target as HTMLInputElement;
+    formData.businessName = target.value;
+    contractorStore.updateFormData({ businessName: target.value });
+  }
+
+  function handleBusinessTaxIdInput(event: Event) {
+    const target = event.target as HTMLInputElement;
+    formData.businessTaxId = target.value;
+    contractorStore.updateFormData({ businessTaxId: target.value });
+  }
+
+  function handleBusinessUrlInput(event: Event) {
+    const target = event.target as HTMLInputElement;
+    formData.businessUrl = target.value;
+    contractorStore.updateFormData({ businessUrl: target.value });
+  }
+
+  function handleAddressLine1Input(event: Event) {
+    const target = event.target as HTMLInputElement;
+    formData.address.line1 = target.value;
+    updateAddressField('line1', target.value);
+  }
+
+  function handleAddressLine2Input(event: Event) {
+    const target = event.target as HTMLInputElement;
+    formData.address.line2 = target.value;
+    updateAddressField('line2', target.value);
+  }
+
+  function handleAddressCityInput(event: Event) {
+    const target = event.target as HTMLInputElement;
+    formData.address.city = target.value;
+    updateAddressField('city', target.value);
+  }
+
+  function handleAddressPostalCodeInput(event: Event) {
+    const target = event.target as HTMLInputElement;
+    formData.address.postalCode = target.value;
+    updateAddressField('postalCode', target.value);
   }
 
   // Validation states come from derived stores
@@ -299,7 +486,7 @@
             type="email"
             placeholder="your@email.com"
             value={formData.email}
-            oninput={(e) => handleInputEvent("email", e)}
+            oninput={handleEmailInput}
             required
           />
         </div>
@@ -319,7 +506,7 @@
                 type="text"
                 placeholder="John"
                 value={formData.firstName}
-                oninput={(e) => handleInputEvent("firstName", e)}
+                oninput={handleFirstNameInput}
                 required
               />
             </div>
@@ -331,7 +518,7 @@
                 type="text"
                 placeholder="Doe"
                 value={formData.lastName}
-                oninput={(e) => handleInputEvent("lastName", e)}
+                oninput={handleLastNameInput}
                 required
               />
             </div>
@@ -346,7 +533,7 @@
                 type="tel"
                 placeholder="+61 400 000 000"
                 value={formData.phone}
-                oninput={(e) => handleInputEvent("phone", e)}
+                oninput={handlePhoneInput}
               />
             </div>
 
@@ -399,7 +586,7 @@
               type="text"
               placeholder="Your Business Pty Ltd"
               value={formData.businessName}
-              oninput={(e) => handleInputEvent("businessName", e)}
+              oninput={handleBusinessNameInput}
               required
             />
           </div>
@@ -411,7 +598,7 @@
               type="text"
               placeholder="12 345 678 901"
               value={formData.businessTaxId}
-              oninput={(e) => handleInputEvent("businessTaxId", e)}
+              oninput={handleBusinessTaxIdInput}
               required
             />
           </div>
@@ -423,7 +610,7 @@
               type="url"
               placeholder="https://yourbusiness.com"
               value={formData.businessUrl}
-              oninput={(e) => handleInputEvent("businessUrl", e)}
+              oninput={handleBusinessUrlInput}
             />
           </div>
 
@@ -453,7 +640,7 @@
             type="text"
             placeholder="123 Main Street"
             value={formData.address.line1}
-            oninput={(e) => handleAddressInputEvent("line1", e)}
+            oninput={handleAddressLine1Input}
             required
           />
         </div>
@@ -465,7 +652,7 @@
             type="text"
             placeholder="Unit 4"
             value={formData.address.line2}
-            oninput={(e) => handleAddressInputEvent("line2", e)}
+            oninput={handleAddressLine2Input}
           />
         </div>
 
@@ -477,7 +664,7 @@
               type="text"
               placeholder="Sydney"
               value={formData.address.city}
-              oninput={(e) => handleAddressInputEvent("city", e)}
+              oninput={handleAddressCityInput}
               required
             />
           </div>
@@ -514,7 +701,7 @@
               type="text"
               placeholder="2000"
               value={formData.address.postalCode}
-              oninput={(e) => handleAddressInputEvent("postalCode", e)}
+              oninput={handleAddressPostalCodeInput}
               required
             />
           </div>
@@ -648,7 +835,7 @@
       {#if currentStep === 1}
         <!-- First step: only Next button, full width -->
         <div class="w-full">
-          <Button class="w-full" onclick={nextStep} disabled={!step1Valid}>
+          <Button class="w-full" onclick={nextStep} disabled={!$step1Valid}>
             Next
           </Button>
         </div>
@@ -724,8 +911,9 @@
           <Button variant="outline" onclick={prevStep}>Previous</Button>
           <Button
             onclick={nextStep}
-            disabled={(currentStep === 2 && !step2Valid) ||
-              (currentStep === 3 && !step3Valid)}
+            disabled={(currentStep === 1 && !$step1Valid) ||
+              (currentStep === 2 && !$step2Valid) ||
+              (currentStep === 3 && !$step3Valid)}
           >
             Next
           </Button>
