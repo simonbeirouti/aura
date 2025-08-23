@@ -3,12 +3,13 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 70;
+	objectVersion = 63;
 	objects = {
 
 /* Begin PBXBuildFile section */
 		1B922E282FC7C3EC54E0C3D9 /* MetalKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7FC324C883BBFF69FEF11EE9 /* MetalKit.framework */; };
 		35DFCFDBD26F27C720D768B4 /* Security.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 95BCEE370A46632ED78EB50D /* Security.framework */; };
+		3E9B0B522E599DEA005CF457 /* StoreKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 3E9B0B512E599DEA005CF457 /* StoreKit.framework */; };
 		50CCE0EEC9338063540BAF8A /* QuartzCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B0AE2B786DE071371DA3EE6D /* QuartzCore.framework */; };
 		7419891DA16F4568CCF7D0B6 /* main.mm in Sources */ = {isa = PBXBuildFile; fileRef = 74F79FB37356517C64CA0E10 /* main.mm */; };
 		7F7EE56DA1ADC0A87467511A /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = EF3C0DF84145C0FA8C8697BE /* Assets.xcassets */; };
@@ -23,10 +24,11 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		1E478217AA0821661E1CD497 /* main.rs */ = {isa = PBXFileReference; path = main.rs; sourceTree = "<group>"; };
+		1E478217AA0821661E1CD497 /* main.rs */ = {isa = PBXFileReference; lastKnownFileType = text; path = main.rs; sourceTree = "<group>"; };
 		283DB933294B5A69B99DBAA8 /* WebKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WebKit.framework; path = System/Library/Frameworks/WebKit.framework; sourceTree = SDKROOT; };
-		2883E0A95526BC59326D7C55 /* aura_iOS.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = aura_iOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		2883E0A95526BC59326D7C55 /* aura_iOS.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; name = aura_iOS.app; path = aura.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		374494E7CDBDEE00C7104701 /* CoreGraphics.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreGraphics.framework; path = System/Library/Frameworks/CoreGraphics.framework; sourceTree = SDKROOT; };
+		3E9B0B512E599DEA005CF457 /* StoreKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = StoreKit.framework; path = System/Library/Frameworks/StoreKit.framework; sourceTree = SDKROOT; };
 		3F56E05B091ACCC3D4EDC7DB /* aura_iOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = aura_iOS.entitlements; sourceTree = "<group>"; };
 		4BBEFCDABDFA734BCE1A2DBA /* libapp.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; path = libapp.a; sourceTree = "<group>"; };
 		4FF483A8861693397E39E2AE /* libapp.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; path = libapp.a; sourceTree = "<group>"; };
@@ -37,7 +39,7 @@
 		95BCEE370A46632ED78EB50D /* Security.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Security.framework; path = System/Library/Frameworks/Security.framework; sourceTree = SDKROOT; };
 		A079A617FF3E9AADEC11C2CE /* UIKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = UIKit.framework; path = System/Library/Frameworks/UIKit.framework; sourceTree = SDKROOT; };
 		B0AE2B786DE071371DA3EE6D /* QuartzCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = QuartzCore.framework; path = System/Library/Frameworks/QuartzCore.framework; sourceTree = SDKROOT; };
-		B11CF21C426189C34DCAF478 /* lib.rs */ = {isa = PBXFileReference; path = lib.rs; sourceTree = "<group>"; };
+		B11CF21C426189C34DCAF478 /* lib.rs */ = {isa = PBXFileReference; lastKnownFileType = text; path = lib.rs; sourceTree = "<group>"; };
 		B69C7BA41ED9A15342A99C3C /* bindings.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = bindings.h; sourceTree = "<group>"; };
 		DB19F5E5DB07B85329514224 /* Metal.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Metal.framework; path = System/Library/Frameworks/Metal.framework; sourceTree = SDKROOT; };
 		EF3C0DF84145C0FA8C8697BE /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -49,6 +51,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				3E9B0B522E599DEA005CF457 /* StoreKit.framework in Frameworks */,
 				B16AFBAC036CF68087C25EE9 /* libapp.a in Frameworks */,
 				F0E01FEC4FE668A91F416001 /* CoreGraphics.framework in Frameworks */,
 				EC59D940AC676B7F156F46FA /* Metal.framework in Frameworks */,
@@ -74,6 +77,7 @@
 		3882F7188C08DACD2D4FBD0B /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
+				3E9B0B512E599DEA005CF457 /* StoreKit.framework */,
 				374494E7CDBDEE00C7104701 /* CoreGraphics.framework */,
 				4FF483A8861693397E39E2AE /* libapp.a */,
 				DB19F5E5DB07B85329514224 /* Metal.framework */,
@@ -169,13 +173,6 @@
 			path = bindings;
 			sourceTree = "<group>";
 		};
-		"TEMP_12D0F8E4-0478-4EF1-A448-B45BC553FA47" /* x86_64 */ = {
-			isa = PBXGroup;
-			children = (
-			);
-			path = x86_64;
-			sourceTree = "<group>";
-		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -218,7 +215,6 @@
 			);
 			mainGroup = 5C98B3D410852F00864A3867;
 			minimizedProjectReferenceProxies = 1;
-			preferredProjectObjectVersion = 70;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
@@ -337,9 +333,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
-				ARCHS = (
-					arm64,
-				);
+				ARCHS = arm64;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = aura_iOS/aura_iOS.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
@@ -354,8 +348,20 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				"LIBRARY_SEARCH_PATHS[arch=arm64]" = "$(inherited) $(PROJECT_DIR)/Externals/arm64/$(CONFIGURATION) $(SDKROOT)/usr/lib/swift $(TOOLCHAIN_DIR)/usr/lib/swift/$(PLATFORM_NAME) $(TOOLCHAIN_DIR)/usr/lib/swift-5.0/$(PLATFORM_NAME)";
-				"LIBRARY_SEARCH_PATHS[arch=x86_64]" = "$(inherited) $(PROJECT_DIR)/Externals/x86_64/$(CONFIGURATION) $(SDKROOT)/usr/lib/swift $(TOOLCHAIN_DIR)/usr/lib/swift/$(PLATFORM_NAME) $(TOOLCHAIN_DIR)/usr/lib/swift-5.0/$(PLATFORM_NAME)";
+				"LIBRARY_SEARCH_PATHS[arch=arm64]" = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/Externals/arm64/$(CONFIGURATION)",
+					"$(SDKROOT)/usr/lib/swift",
+					"$(TOOLCHAIN_DIR)/usr/lib/swift/$(PLATFORM_NAME)",
+					"$(TOOLCHAIN_DIR)/usr/lib/swift-5.0/$(PLATFORM_NAME)",
+				);
+				"LIBRARY_SEARCH_PATHS[arch=x86_64]" = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/Externals/x86_64/$(CONFIGURATION)",
+					"$(SDKROOT)/usr/lib/swift",
+					"$(TOOLCHAIN_DIR)/usr/lib/swift/$(PLATFORM_NAME)",
+					"$(TOOLCHAIN_DIR)/usr/lib/swift-5.0/$(PLATFORM_NAME)",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.aura.app;
 				PRODUCT_NAME = "aura";
 				SDKROOT = iphoneos;
@@ -431,9 +437,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
-				ARCHS = (
-					arm64,
-				);
+				ARCHS = arm64;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = aura_iOS/aura_iOS.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
@@ -448,8 +452,20 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				"LIBRARY_SEARCH_PATHS[arch=arm64]" = "$(inherited) $(PROJECT_DIR)/Externals/arm64/$(CONFIGURATION) $(SDKROOT)/usr/lib/swift $(TOOLCHAIN_DIR)/usr/lib/swift/$(PLATFORM_NAME) $(TOOLCHAIN_DIR)/usr/lib/swift-5.0/$(PLATFORM_NAME)";
-				"LIBRARY_SEARCH_PATHS[arch=x86_64]" = "$(inherited) $(PROJECT_DIR)/Externals/x86_64/$(CONFIGURATION) $(SDKROOT)/usr/lib/swift $(TOOLCHAIN_DIR)/usr/lib/swift/$(PLATFORM_NAME) $(TOOLCHAIN_DIR)/usr/lib/swift-5.0/$(PLATFORM_NAME)";
+				"LIBRARY_SEARCH_PATHS[arch=arm64]" = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/Externals/arm64/$(CONFIGURATION)",
+					"$(SDKROOT)/usr/lib/swift",
+					"$(TOOLCHAIN_DIR)/usr/lib/swift/$(PLATFORM_NAME)",
+					"$(TOOLCHAIN_DIR)/usr/lib/swift-5.0/$(PLATFORM_NAME)",
+				);
+				"LIBRARY_SEARCH_PATHS[arch=x86_64]" = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/Externals/x86_64/$(CONFIGURATION)",
+					"$(SDKROOT)/usr/lib/swift",
+					"$(TOOLCHAIN_DIR)/usr/lib/swift/$(PLATFORM_NAME)",
+					"$(TOOLCHAIN_DIR)/usr/lib/swift-5.0/$(PLATFORM_NAME)",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.aura.app;
 				PRODUCT_NAME = "aura";
 				SDKROOT = iphoneos;

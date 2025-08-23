@@ -8,6 +8,7 @@
   } from "$lib/components/ui/card";
   import { Button } from "$lib/components/ui/button";
   import AppLayout from "$lib/components/AppLayout.svelte";
+  import IAPTester from "$lib/components/IAPTester.svelte";
 
   function playBounceAnimation() {
     animate(".bounce-target", {
@@ -78,6 +79,11 @@
 </svelte:head>
 
 <AppLayout maxWidth="max-w-6xl">
+  <!-- IAP Testing Section -->
+  <div class="mb-8">
+    <IAPTester />
+  </div>
+
   <!-- Animation Cards Grid -->
   <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
     <!-- Bounce Card -->
