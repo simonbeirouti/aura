@@ -100,6 +100,93 @@ pub struct SubscriptionPlan {
     pub updated_at: Option<String>,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ContractorKycFormData {
+    #[serde(rename = "contractorType", alias = "contractor_type")]
+    pub contractor_type: String,
+    pub email: String,
+    
+    // Individual fields
+    #[serde(rename = "firstName", alias = "first_name")]
+    pub first_name: Option<String>,
+    #[serde(rename = "lastName", alias = "last_name")]
+    pub last_name: Option<String>,
+    pub phone: Option<String>,
+    #[serde(rename = "dateOfBirth", alias = "date_of_birth")]
+    pub date_of_birth: Option<String>,
+    #[serde(rename = "nationalIdNumber", alias = "national_id_number")]
+    pub national_id_number: Option<String>,
+    #[serde(rename = "nationalIdType", alias = "national_id_type")]
+    pub national_id_type: Option<String>,
+    
+    // Business fields
+    #[serde(rename = "businessName", alias = "business_name")]
+    pub business_name: Option<String>,
+    #[serde(rename = "businessTaxId", alias = "business_tax_id")]
+    pub business_tax_id: Option<String>,
+    #[serde(rename = "businessUrl", alias = "business_url")]
+    pub business_url: Option<String>,
+    #[serde(rename = "businessDescription", alias = "business_description")]
+    pub business_description: Option<String>,
+    #[serde(rename = "industryMccCode", alias = "industry_mcc_code")]
+    pub industry_mcc_code: Option<String>,
+    #[serde(rename = "companyRegistrationNumber", alias = "company_registration_number")]
+    pub company_registration_number: Option<String>,
+    #[serde(rename = "companyStructure", alias = "company_structure")]
+    pub company_structure: Option<String>,
+    
+    // Address
+    pub address: Option<ContractorAddress>,
+    
+    // Bank account
+    #[serde(rename = "bankAccount", alias = "bank_account")]
+    pub bank_account: Option<ContractorBankAccount>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ContractorAddress {
+    pub line1: String,
+    pub line2: Option<String>,
+    pub city: String,
+    pub state: String,
+    #[serde(rename = "postalCode", alias = "postal_code")]
+    pub postal_code: String,
+    pub country: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Contractor {
+    pub id: String,
+    pub user_id: String,
+    pub profile_id: String,
+    pub contractor_type: String,
+    pub kyc_status: String,
+    pub is_active: bool,
+    pub stripe_connect_account_id: Option<String>,
+    pub stripe_connect_account_status: Option<String>,
+    pub stripe_connect_requirements_completed: Option<bool>,
+    
+    // Business information
+    pub business_name: Option<String>,
+    pub business_tax_id: Option<String>,
+    pub business_website_url: Option<String>,
+    pub business_description: Option<String>,
+    pub industry_mcc_code: Option<String>,
+    pub company_registration_number: Option<String>,
+    pub company_structure: Option<String>,
+    
+    // Individual information
+    pub first_name: Option<String>,
+    pub last_name: Option<String>,
+    pub date_of_birth: Option<String>,
+    pub phone_number: Option<String>,
+    pub national_id_number: Option<String>,
+    pub national_id_type: Option<String>,
+    
+    pub created_at: Option<String>,
+    pub updated_at: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SubscriptionPrice {
     pub id: String,
@@ -1008,4 +1095,775 @@ pub async fn get_user_purchases(
         .map_err(|e| format!("Failed to parse purchases response: {}", e))?;
     
     Ok(purchases)
+}
+
+/// Save contractor KYC form data for auto-save functionality
+#[command]
+pub async fn save_kyc_form_data(
+    user_id: String,
+    kyc_data: ContractorKycFormData,
+    app: tauri::AppHandle,
+) -> Result<String, String> {
+    let db_config = get_authenticated_db(&app).await?;
+
+    // Verify user is authenticated
+    let session_check = crate::session::check_session(app.clone()).await?;
+    if !session_check {
+        return Err("User not authenticated".to_string());
+    }
+
+    let client = reqwest::Client::new();
+    
+    // Convert form data to JSON
+    let kyc_json = serde_json::to_value(&kyc_data)
+        .map_err(|e| format!("Failed to serialize KYC data: {}", e))?;
+
+    // Use UPSERT with ON CONFLICT clause for proper update/insert behavior
+    let response = client
+        .post(&format!("{}/rest/v1/contractor_kyc_form_data?on_conflict=user_id", db_config.database_url))
+        .header("Authorization", format!("Bearer {}", db_config.access_token))
+        .header("apikey", &db_config.anon_key)
+        .header("Content-Type", "application/json")
+        .header("Prefer", "resolution=merge-duplicates")
+        .json(&serde_json::json!({
+            "user_id": user_id,
+            "kyc_data": kyc_json
+        }))
+        .send()
+        .await
+        .map_err(|e| format!("Failed to save KYC form data: {}", e))?;
+
+    if !response.status().is_success() {
+        let error_text = response.text().await.unwrap_or_default();
+        return Err(format!("Database error: {}", error_text));
+    }
+
+    Ok("KYC form data saved successfully".to_string())
+}
+
+/// Load contractor KYC form data
+#[command]
+pub async fn load_kyc_form_data(
+    user_id: String,
+    app: tauri::AppHandle,
+) -> Result<Option<ContractorKycFormData>, String> {
+    let db_config = get_authenticated_db(&app).await?;
+
+    // Verify user is authenticated
+    let session_check = crate::session::check_session(app.clone()).await?;
+    if !session_check {
+        return Err("User not authenticated".to_string());
+    }
+
+    let client = reqwest::Client::new();
+    
+    let response = client
+        .get(&format!("{}/rest/v1/contractor_kyc_form_data", db_config.database_url))
+        .header("Authorization", format!("Bearer {}", db_config.access_token))
+        .header("apikey", &db_config.anon_key)
+        .query(&[("user_id", format!("eq.{}", user_id))])
+        .query(&[("select", "kyc_data")])
+        .send()
+        .await
+        .map_err(|e| format!("Failed to load KYC form data: {}", e))?;
+
+    if !response.status().is_success() {
+        let error_text = response.text().await.unwrap_or_default();
+        return Err(format!("Database error: {}", error_text));
+    }
+
+    let form_data_records: Vec<serde_json::Value> = response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse KYC form data response: {}", e))?;
+
+    if let Some(record) = form_data_records.first() {
+        if let Some(kyc_data) = record.get("kyc_data") {
+            let form_data: ContractorKycFormData = serde_json::from_value(kyc_data.clone())
+                .map_err(|e| format!("Failed to deserialize KYC data: {}", e))?;
+            return Ok(Some(form_data));
+        }
+    }
+
+    Ok(None)
+}
+
+/// Create contractor profile and Stripe Connect account
+#[command]
+pub async fn create_contractor_profile(
+    user_id: String,
+    kyc_data: ContractorKycFormData,
+    app: tauri::AppHandle,
+) -> Result<Contractor, String> {
+    let db_config = get_authenticated_db(&app).await?;
+
+    // Verify user is authenticated
+    let session_check = crate::session::check_session(app.clone()).await?;
+    if !session_check {
+        return Err("User not authenticated".to_string());
+    }
+
+    // Get user profile to link contractor
+    let profile = get_user_profile(user_id.clone(), app.clone()).await?
+        .ok_or("User profile not found")?;
+
+    // Create Stripe Connect account
+    println!("🔄 Creating Stripe Connect account for user: {}", user_id);
+    let connect_response = crate::stripe::create_connect_account(
+        user_id.clone(),
+        kyc_data.contractor_type.clone(),
+        kyc_data.email.clone(),
+        app.clone(),
+    ).await.map_err(|e| {
+        println!("❌ Stripe Connect account creation failed: {}", e);
+        e
+    })?;
+    
+    println!("✅ Stripe Connect account created: {}", connect_response.account_id);
+
+    let client = reqwest::Client::new();
+    
+    // Create contractor record
+    let contractor_data = serde_json::json!({
+        "user_id": user_id,
+        "profile_id": profile.id,
+        "contractor_type": kyc_data.contractor_type,
+        "kyc_status": "submitted",
+        "is_active": true,
+        "stripe_connect_account_id": connect_response.account_id,
+        "stripe_connect_account_status": "pending",
+        "stripe_connect_requirements_completed": connect_response.requirements_completed,
+        "business_name": kyc_data.business_name,
+        "business_tax_id": kyc_data.business_tax_id
+    });
+    
+    println!("📋 Attempting to create contractor record:");
+    println!("   - user_id: {}", user_id);
+    println!("   - profile_id: {}", profile.id);
+    println!("   - contractor_type: {}", kyc_data.contractor_type);
+    println!("   - stripe_connect_account_id: {}", connect_response.account_id);
+    println!("   - business_name: {:?}", kyc_data.business_name);
+    println!("   - business_tax_id: {:?}", kyc_data.business_tax_id);
+
+    let response = client
+        .post(&format!("{}/rest/v1/contractors", db_config.database_url))
+        .header("Authorization", format!("Bearer {}", db_config.access_token))
+        .header("apikey", &db_config.anon_key)
+        .header("Content-Type", "application/json")
+        .header("Prefer", "return=representation")
+        .json(&contractor_data)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to create contractor: {}", e))?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let error_text = response.text().await.unwrap_or_default();
+        println!("❌ Database contractor creation failed: HTTP {} - {}", status, error_text);
+        
+        // Check if it's a constraint violation or schema issue
+        if status.as_u16() == 409 {
+            println!("🔍 Constraint violation - contractor may already exist for this user");
+        } else if status.as_u16() == 422 {
+            println!("🔍 Schema validation error - check required fields and data types");
+        } else if status.as_u16() == 401 || status.as_u16() == 403 {
+            println!("🔍 Authentication/authorization error - check RLS policies");
+        }
+        
+        return Err(format!("Failed to create contractor record: HTTP {} {}", status, 
+                          if error_text.is_empty() { status.canonical_reason().unwrap_or("Unknown error") } else { &error_text }));
+    }
+
+    let contractors: Vec<Contractor> = response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse contractor response: {}", e))?;
+
+    let contractor = contractors.into_iter().next()
+        .ok_or("Failed to create contractor")?;
+
+    println!("✅ Contractor record created successfully with ID: {}", contractor.id);
+
+    // Create contractor address record
+    if let Some(address) = kyc_data.address {
+        println!("🏠 Creating contractor address record for contractor ID: {}", contractor.id);
+        let address_data = serde_json::json!({
+            "contractor_id": contractor.id,
+            "address_type": "residential",
+            "street_address": address.line1,
+            "street_address_2": address.line2,
+            "city": address.city,
+            "state_province": address.state,
+            "postal_code": address.postal_code,
+            "country": address.country,
+            "is_verified": false
+        });
+        
+        println!("📋 Address data: {:?}", address_data);
+
+        let address_response = client
+            .post(&format!("{}/rest/v1/contractor_addresses", db_config.database_url))
+            .header("Authorization", format!("Bearer {}", db_config.access_token))
+            .header("apikey", &db_config.anon_key)
+            .header("Content-Type", "application/json")
+            .json(&address_data)
+            .send()
+            .await
+            .map_err(|e| format!("Failed to create contractor address: {}", e))?;
+            
+        if !address_response.status().is_success() {
+            let status = address_response.status();
+            let error_text = address_response.text().await.unwrap_or_default();
+            println!("❌ Failed to create contractor address: HTTP {} - {}", status, error_text);
+            // Don't fail the entire process for address creation failure
+            println!("⚠️ Continuing without address record");
+        } else {
+            println!("✅ Contractor address created successfully");
+        }
+    }
+
+    // Update profile to mark as contractor
+    println!("👤 Updating profile to mark as contractor: profile_id={}, contractor_id={}", profile.id, contractor.id);
+    let profile_update_response = client
+        .patch(&format!("{}/rest/v1/profiles", db_config.database_url))
+        .header("Authorization", format!("Bearer {}", db_config.access_token))
+        .header("apikey", &db_config.anon_key)
+        .header("Content-Type", "application/json")
+        .query(&[("id", format!("eq.{}", profile.id))])
+        .json(&serde_json::json!({
+            "is_contractor": true,
+            "contractor_id": contractor.id
+        }))
+        .send()
+        .await
+        .map_err(|e| format!("Failed to update profile: {}", e))?;
+        
+    if !profile_update_response.status().is_success() {
+        let status = profile_update_response.status();
+        let error_text = profile_update_response.text().await.unwrap_or_default();
+        println!("❌ Failed to update profile: HTTP {} - {}", status, error_text);
+        // Don't fail the entire process for profile update failure
+        println!("⚠️ Continuing without profile update");
+    } else {
+        println!("✅ Profile updated successfully");
+    }
+
+    Ok(contractor)
+}
+
+/// Get contractor profile for user
+#[command]
+pub async fn get_contractor_profile(
+    user_id: String,
+    app: tauri::AppHandle,
+) -> Result<Option<Contractor>, String> {
+    let db_config = get_authenticated_db(&app).await?;
+
+    // Verify user is authenticated
+    let session_check = crate::session::check_session(app.clone()).await?;
+    if !session_check {
+        return Err("User not authenticated".to_string());
+    }
+
+    let client = reqwest::Client::new();
+    
+    let response = client
+        .get(&format!("{}/rest/v1/contractors", db_config.database_url))
+        .header("Authorization", format!("Bearer {}", db_config.access_token))
+        .header("apikey", &db_config.anon_key)
+        .query(&[("user_id", format!("eq.{}", user_id))])
+        .send()
+        .await
+        .map_err(|e| format!("Failed to get contractor profile: {}", e))?;
+
+    if !response.status().is_success() {
+        let error_text = response.text().await.unwrap_or_default();
+        return Err(format!("Database error: {}", error_text));
+    }
+
+    let contractors: Vec<Contractor> = response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse contractor response: {}", e))?;
+
+    Ok(contractors.into_iter().next())
+}
+
+// New structs for additional KYC entities
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ContractorBankAccount {
+    #[serde(rename = "accountHolderName", alias = "account_holder_name")]
+    pub account_holder_name: String,
+    #[serde(rename = "accountNumber", alias = "account_number")]
+    pub account_number: String,
+    #[serde(rename = "routingNumber", alias = "routing_number")]
+    pub routing_number: String,
+    #[serde(rename = "bankName", alias = "bank_name")]
+    pub bank_name: String,
+    #[serde(rename = "accountType", alias = "account_type")]
+    pub account_type: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct BeneficialOwner {
+    pub id: String,
+    pub contractor_id: String,
+    pub first_name: String,
+    pub last_name: String,
+    pub date_of_birth: String,
+    pub email: Option<String>,
+    pub phone_number: Option<String>,
+    pub street_address: String,
+    pub street_address_2: Option<String>,
+    pub city: String,
+    pub state_province: Option<String>,
+    pub postal_code: String,
+    pub country: String,
+    pub ownership_percentage: f64,
+    pub title: Option<String>,
+    pub national_id_number: Option<String>,
+    pub national_id_type: Option<String>,
+    pub is_verified: bool,
+    pub verified_at: Option<String>,
+    pub verification_notes: Option<String>,
+    pub created_at: Option<String>,
+    pub updated_at: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Representative {
+    pub id: String,
+    pub contractor_id: String,
+    pub first_name: String,
+    pub last_name: String,
+    pub date_of_birth: String,
+    pub email: Option<String>,
+    pub phone_number: Option<String>,
+    pub street_address: String,
+    pub street_address_2: Option<String>,
+    pub city: String,
+    pub state_province: Option<String>,
+    pub postal_code: String,
+    pub country: String,
+    pub title: String,
+    pub is_authorized_signatory: bool,
+    pub national_id_number: Option<String>,
+    pub national_id_type: Option<String>,
+    pub is_verified: bool,
+    pub verified_at: Option<String>,
+    pub verification_notes: Option<String>,
+    pub created_at: Option<String>,
+    pub updated_at: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct DocumentUpload {
+    pub id: String,
+    pub contractor_id: String,
+    pub document_type: String,
+    pub document_purpose: String,
+    pub file_name: String,
+    pub file_size: Option<i64>,
+    pub mime_type: Option<String>,
+    pub stripe_file_id: Option<String>,
+    pub stripe_upload_status: String,
+    pub stripe_upload_error: Option<String>,
+    pub local_file_path: Option<String>,
+    pub file_hash: Option<String>,
+    pub verification_status: String,
+    pub verification_notes: Option<String>,
+    pub verified_at: Option<String>,
+    pub required_for_capability: Option<Vec<String>>,
+    pub requirement_id: Option<String>,
+    pub created_at: Option<String>,
+    pub updated_at: Option<String>,
+}
+
+// Database commands for new entities
+
+/// Create beneficial owner
+#[command]
+pub async fn create_beneficial_owner(
+    contractor_id: String,
+    first_name: String,
+    last_name: String,
+    date_of_birth: String,
+    email: Option<String>,
+    phone_number: Option<String>,
+    street_address: String,
+    street_address_2: Option<String>,
+    city: String,
+    state_province: Option<String>,
+    postal_code: String,
+    country: String,
+    ownership_percentage: f64,
+    title: Option<String>,
+    national_id_number: Option<String>,
+    national_id_type: Option<String>,
+    app: tauri::AppHandle,
+) -> Result<BeneficialOwner, String> {
+    let db_config = get_authenticated_db(&app).await?;
+    let session_check = crate::session::check_session(app.clone()).await?;
+    if !session_check {
+        return Err("Authentication required".to_string());
+    }
+
+    let client = reqwest::Client::new();
+    let payload = serde_json::json!({
+        "contractor_id": contractor_id,
+        "first_name": first_name,
+        "last_name": last_name,
+        "date_of_birth": date_of_birth,
+        "email": email,
+        "phone_number": phone_number,
+        "street_address": street_address,
+        "street_address_2": street_address_2,
+        "city": city,
+        "state_province": state_province,
+        "postal_code": postal_code,
+        "country": country,
+        "ownership_percentage": ownership_percentage,
+        "title": title,
+        "national_id_number": national_id_number,
+        "national_id_type": national_id_type,
+        "is_verified": false
+    });
+
+    let response = client
+        .post(&format!("{}/rest/v1/contractor_beneficial_owners", db_config.database_url))
+        .header("Authorization", format!("Bearer {}", db_config.access_token))
+        .header("apikey", &db_config.anon_key)
+        .header("Content-Type", "application/json")
+        .header("Prefer", "return=representation")
+        .json(&payload)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to create beneficial owner: {}", e))?;
+
+    if !response.status().is_success() {
+        let error_text = response.text().await.unwrap_or_default();
+        return Err(format!("Database error creating beneficial owner: {}", error_text));
+    }
+
+    let beneficial_owners: Vec<BeneficialOwner> = response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse beneficial owner response: {}", e))?;
+
+    beneficial_owners
+        .into_iter()
+        .next()
+        .ok_or_else(|| "No beneficial owner returned from database".to_string())
+}
+
+/// Get beneficial owners for contractor
+#[command]
+pub async fn get_beneficial_owners(
+    contractor_id: String,
+    app: tauri::AppHandle,
+) -> Result<Vec<BeneficialOwner>, String> {
+    let db_config = get_authenticated_db(&app).await?;
+    let session_check = crate::session::check_session(app.clone()).await?;
+    if !session_check {
+        return Err("Authentication required".to_string());
+    }
+
+    let client = reqwest::Client::new();
+    let response = client
+        .get(&format!("{}/rest/v1/contractor_beneficial_owners", db_config.database_url))
+        .header("Authorization", format!("Bearer {}", db_config.access_token))
+        .header("apikey", &db_config.anon_key)
+        .query(&[("contractor_id", format!("eq.{}", contractor_id))])
+        .send()
+        .await
+        .map_err(|e| format!("Failed to fetch beneficial owners: {}", e))?;
+
+    if !response.status().is_success() {
+        let error_text = response.text().await.unwrap_or_default();
+        return Err(format!("Database error fetching beneficial owners: {}", error_text));
+    }
+
+    let beneficial_owners: Vec<BeneficialOwner> = response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse beneficial owners response: {}", e))?;
+
+    Ok(beneficial_owners)
+}
+
+/// Create representative
+#[command]
+pub async fn create_representative(
+    contractor_id: String,
+    first_name: String,
+    last_name: String,
+    date_of_birth: String,
+    email: Option<String>,
+    phone_number: Option<String>,
+    street_address: String,
+    street_address_2: Option<String>,
+    city: String,
+    state_province: Option<String>,
+    postal_code: String,
+    country: String,
+    title: String,
+    is_authorized_signatory: bool,
+    national_id_number: Option<String>,
+    national_id_type: Option<String>,
+    app: tauri::AppHandle,
+) -> Result<Representative, String> {
+    let db_config = get_authenticated_db(&app).await?;
+    let session_check = crate::session::check_session(app.clone()).await?;
+    if !session_check {
+        return Err("Authentication required".to_string());
+    }
+
+    let client = reqwest::Client::new();
+    let payload = serde_json::json!({
+        "contractor_id": contractor_id,
+        "first_name": first_name,
+        "last_name": last_name,
+        "date_of_birth": date_of_birth,
+        "email": email,
+        "phone_number": phone_number,
+        "street_address": street_address,
+        "street_address_2": street_address_2,
+        "city": city,
+        "state_province": state_province,
+        "postal_code": postal_code,
+        "country": country,
+        "title": title,
+        "is_authorized_signatory": is_authorized_signatory,
+        "national_id_number": national_id_number,
+        "national_id_type": national_id_type,
+        "is_verified": false
+    });
+
+    let response = client
+        .post(&format!("{}/rest/v1/contractor_representatives", db_config.database_url))
+        .header("Authorization", format!("Bearer {}", db_config.access_token))
+        .header("apikey", &db_config.anon_key)
+        .header("Content-Type", "application/json")
+        .header("Prefer", "return=representation")
+        .json(&payload)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to create representative: {}", e))?;
+
+    if !response.status().is_success() {
+        let error_text = response.text().await.unwrap_or_default();
+        return Err(format!("Database error creating representative: {}", error_text));
+    }
+
+    let representatives: Vec<Representative> = response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse representative response: {}", e))?;
+
+    representatives
+        .into_iter()
+        .next()
+        .ok_or_else(|| "No representative returned from database".to_string())
+}
+
+/// Get representatives for contractor
+#[command]
+pub async fn get_representatives(
+    contractor_id: String,
+    app: tauri::AppHandle,
+) -> Result<Vec<Representative>, String> {
+    let db_config = get_authenticated_db(&app).await?;
+    let session_check = crate::session::check_session(app.clone()).await?;
+    if !session_check {
+        return Err("Authentication required".to_string());
+    }
+
+    let client = reqwest::Client::new();
+    let response = client
+        .get(&format!("{}/rest/v1/contractor_representatives", db_config.database_url))
+        .header("Authorization", format!("Bearer {}", db_config.access_token))
+        .header("apikey", &db_config.anon_key)
+        .query(&[("contractor_id", format!("eq.{}", contractor_id))])
+        .send()
+        .await
+        .map_err(|e| format!("Failed to fetch representatives: {}", e))?;
+
+    if !response.status().is_success() {
+        let error_text = response.text().await.unwrap_or_default();
+        return Err(format!("Database error fetching representatives: {}", error_text));
+    }
+
+    let representatives: Vec<Representative> = response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse representatives response: {}", e))?;
+
+    Ok(representatives)
+}
+
+/// Create document upload record
+#[command]
+pub async fn create_document_upload(
+    contractor_id: String,
+    document_type: String,
+    document_purpose: String,
+    file_name: String,
+    file_size: Option<i64>,
+    mime_type: Option<String>,
+    stripe_file_id: Option<String>,
+    local_file_path: Option<String>,
+    file_hash: Option<String>,
+    required_for_capability: Option<Vec<String>>,
+    requirement_id: Option<String>,
+    app: tauri::AppHandle,
+) -> Result<DocumentUpload, String> {
+    let db_config = get_authenticated_db(&app).await?;
+    let session_check = crate::session::check_session(app.clone()).await?;
+    if !session_check {
+        return Err("Authentication required".to_string());
+    }
+
+    let client = reqwest::Client::new();
+    let payload = serde_json::json!({
+        "contractor_id": contractor_id,
+        "document_type": document_type,
+        "document_purpose": document_purpose,
+        "file_name": file_name,
+        "file_size": file_size,
+        "mime_type": mime_type,
+        "stripe_file_id": stripe_file_id,
+        "stripe_upload_status": "pending",
+        "local_file_path": local_file_path,
+        "file_hash": file_hash,
+        "verification_status": "pending",
+        "required_for_capability": required_for_capability,
+        "requirement_id": requirement_id
+    });
+
+    let response = client
+        .post(&format!("{}/rest/v1/contractor_document_uploads", db_config.database_url))
+        .header("Authorization", format!("Bearer {}", db_config.access_token))
+        .header("apikey", &db_config.anon_key)
+        .header("Content-Type", "application/json")
+        .header("Prefer", "return=representation")
+        .json(&payload)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to create document upload: {}", e))?;
+
+    if !response.status().is_success() {
+        let error_text = response.text().await.unwrap_or_default();
+        return Err(format!("Database error creating document upload: {}", error_text));
+    }
+
+    let document_uploads: Vec<DocumentUpload> = response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse document upload response: {}", e))?;
+
+    document_uploads
+        .into_iter()
+        .next()
+        .ok_or_else(|| "No document upload returned from database".to_string())
+}
+
+/// Get document uploads for contractor
+#[command]
+pub async fn get_document_uploads(
+    contractor_id: String,
+    app: tauri::AppHandle,
+) -> Result<Vec<DocumentUpload>, String> {
+    let db_config = get_authenticated_db(&app).await?;
+    let session_check = crate::session::check_session(app.clone()).await?;
+    if !session_check {
+        return Err("Authentication required".to_string());
+    }
+
+    let client = reqwest::Client::new();
+    let response = client
+        .get(&format!("{}/rest/v1/contractor_document_uploads", db_config.database_url))
+        .header("Authorization", format!("Bearer {}", db_config.access_token))
+        .header("apikey", &db_config.anon_key)
+        .query(&[("contractor_id", format!("eq.{}", contractor_id))])
+        .send()
+        .await
+        .map_err(|e| format!("Failed to fetch document uploads: {}", e))?;
+
+    if !response.status().is_success() {
+        let error_text = response.text().await.unwrap_or_default();
+        return Err(format!("Database error fetching document uploads: {}", error_text));
+    }
+
+    let document_uploads: Vec<DocumentUpload> = response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse document uploads response: {}", e))?;
+
+    Ok(document_uploads)
+}
+
+/// Update document upload status
+#[command]
+pub async fn update_document_upload_status(
+    document_id: String,
+    stripe_file_id: Option<String>,
+    stripe_upload_status: Option<String>,
+    stripe_upload_error: Option<String>,
+    verification_status: Option<String>,
+    verification_notes: Option<String>,
+    app: tauri::AppHandle,
+) -> Result<DocumentUpload, String> {
+    let db_config = get_authenticated_db(&app).await?;
+    let session_check = crate::session::check_session(app.clone()).await?;
+    if !session_check {
+        return Err("Authentication required".to_string());
+    }
+
+    let client = reqwest::Client::new();
+    let mut payload = serde_json::json!({});
+    
+    if let Some(file_id) = stripe_file_id {
+        payload["stripe_file_id"] = serde_json::Value::String(file_id);
+    }
+    if let Some(upload_status) = stripe_upload_status {
+        payload["stripe_upload_status"] = serde_json::Value::String(upload_status);
+    }
+    if let Some(upload_error) = stripe_upload_error {
+        payload["stripe_upload_error"] = serde_json::Value::String(upload_error);
+    }
+    if let Some(verification_status) = verification_status {
+        payload["verification_status"] = serde_json::Value::String(verification_status);
+    }
+    if let Some(verification_notes) = verification_notes {
+        payload["verification_notes"] = serde_json::Value::String(verification_notes);
+    }
+    payload["updated_at"] = serde_json::Value::String(chrono::Utc::now().to_rfc3339());
+
+    let response = client
+        .patch(&format!("{}/rest/v1/contractor_document_uploads", db_config.database_url))
+        .header("Authorization", format!("Bearer {}", db_config.access_token))
+        .header("apikey", &db_config.anon_key)
+        .header("Content-Type", "application/json")
+        .header("Prefer", "return=representation")
+        .query(&[("id", format!("eq.{}", document_id))])
+        .json(&payload)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to update document upload: {}", e))?;
+
+    if !response.status().is_success() {
+        let error_text = response.text().await.unwrap_or_default();
+        return Err(format!("Database error updating document upload: {}", error_text));
+    }
+
+    let document_uploads: Vec<DocumentUpload> = response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse document upload response: {}", e))?;
+
+    document_uploads
+        .into_iter()
+        .next()
+        .ok_or_else(|| "No document upload returned from database".to_string())
 }
