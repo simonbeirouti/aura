@@ -112,6 +112,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_http::init())
+        .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             // Session management commands
             session::store_tokens,
@@ -135,6 +136,16 @@ pub fn run() {
             database::load_kyc_form_data,
             database::create_contractor_profile,
             database::get_contractor_profile,
+            // Beneficial owner commands
+            database::create_beneficial_owner,
+            database::get_beneficial_owners,
+            // Representative commands
+            database::create_representative,
+            database::get_representatives,
+            // Document upload commands
+            database::create_document_upload,
+            database::get_document_uploads,
+            database::update_document_upload_status,
             // Payment method database commands
             database::store_payment_method,
             database::get_user_payment_methods,
@@ -194,7 +205,20 @@ pub fn run() {
             stripe::create_account_onboarding_link,
             stripe::get_connect_account_status,
             stripe::update_connect_account_kyc,
-            stripe::get_contractor_status
+            stripe::get_contractor_status,
+            // URL opening command
+            stripe::open_url_in_browser,
+            // Debug command
+            stripe::debug_stripe_connect_status,
+            // API onboarding commands
+            stripe::update_connect_account_business,
+            stripe::add_connect_account_bank_account,
+            stripe::get_connect_account_requirements,
+            // Stripe File API commands
+            stripe::upload_file_to_stripe,
+            stripe::upload_contractor_document,
+            stripe::get_stripe_file,
+            stripe::delete_stripe_file
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

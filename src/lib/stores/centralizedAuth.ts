@@ -2,7 +2,16 @@ import { writable, derived } from 'svelte/store';
 import { invoke } from '@tauri-apps/api/core';
 import { authStore } from './supabaseAuth';
 import { stripeStore } from './stripeStore';
-import { dataActions } from './dataStore';
+// Import dataActions lazily to avoid initialization issues
+let dataActions: any = null;
+
+const getDataActions = async () => {
+  if (!dataActions) {
+    const module = await import('./dataStore');
+    dataActions = module.dataActions;
+  }
+  return dataActions;
+};
 
 interface AuthState {
   isInitialized: boolean;
@@ -298,9 +307,10 @@ class CentralizedAuthStore {
     }));
 
     try {
-      // Load user profile
-      await dataActions.initialize();
-      const profile = await dataActions.getUserProfile(user.id, false);
+      // Load user profile with lazy import
+      const actions = await getDataActions();
+      await actions.initialize();
+      const profile = await actions.getUserProfile(user.id, false);
       
       // Initialize/refresh Stripe for this user
       await this.initializeStripe();
@@ -357,7 +367,8 @@ class CentralizedAuthStore {
     }
 
     try {
-      const profile = await dataActions.getUserProfile(state.user.id, true); // Force refresh
+      const actions = await getDataActions();
+      const profile = await actions.getUserProfile(state.user.id, true); // Force refresh
       this.store.update(state => ({ ...state, profile }));
     } catch (error) {
       console.error('Failed to refresh profile:', error);
@@ -372,14 +383,41 @@ class CentralizedAuthStore {
   }
 
   /**
-   * Get current auth state
+   * Get current auth state safely
    */
   async getState(): Promise<AuthState> {
     return new Promise<AuthState>(resolve => {
-      const unsubscribe = this.store.subscribe(state => {
-        unsubscribe();
-        resolve(state);
-      });
+      try {
+        if (!this.store || typeof this.store.subscribe !== 'function') {
+          console.warn('CentralizedAuth store not initialized, returning default state');
+          resolve({
+            isInitialized: false,
+            isAuthenticated: false,
+            user: null,
+            profile: null,
+            isLoading: false,
+            error: 'Store not initialized',
+            stripeInitialized: false
+          });
+          return;
+        }
+        
+        const unsubscribe = this.store.subscribe(state => {
+          unsubscribe();
+          resolve(state);
+        });
+      } catch (error) {
+        console.error('Error getting auth state:', error);
+        resolve({
+          isInitialized: false,
+          isAuthenticated: false,
+          user: null,
+          profile: null,
+          isLoading: false,
+          error: `Failed to get state: ${error}`,
+          stripeInitialized: false
+        });
+      }
     });
   }
 

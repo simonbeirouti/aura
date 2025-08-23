@@ -5,7 +5,6 @@
 -- Create contractor types enum
 CREATE TYPE contractor_type AS ENUM ('individual', 'business');
 CREATE TYPE kyc_status AS ENUM ('pending', 'submitted', 'under_review', 'approved', 'rejected', 'expired');
-CREATE TYPE verification_document_type AS ENUM ('passport', 'drivers_license', 'national_id', 'business_license', 'tax_certificate');
 
 -- Create contractors table
 CREATE TABLE IF NOT EXISTS contractors (
@@ -41,31 +40,6 @@ CREATE TABLE IF NOT EXISTS contractors (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Create contractor verification documents table
-CREATE TABLE IF NOT EXISTS contractor_verification_documents (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    contractor_id UUID NOT NULL REFERENCES contractors(id) ON DELETE CASCADE,
-    
-    -- Document information
-    document_type verification_document_type NOT NULL,
-    document_number TEXT,
-    document_issuer TEXT,
-    document_issued_date DATE,
-    document_expiry_date DATE,
-    
-    -- File storage
-    document_file_url TEXT, -- URL to stored document
-    document_file_hash TEXT, -- For integrity verification
-    
-    -- Verification status
-    is_verified BOOLEAN DEFAULT false,
-    verified_at TIMESTAMPTZ,
-    verification_notes TEXT,
-    
-    -- Timestamps
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
-);
 
 -- Create contractor bank accounts table
 CREATE TABLE IF NOT EXISTS contractor_bank_accounts (
@@ -124,9 +98,6 @@ CREATE INDEX IF NOT EXISTS idx_contractors_kyc_status ON contractors(kyc_status)
 CREATE INDEX IF NOT EXISTS idx_contractors_stripe_connect_account_id ON contractors(stripe_connect_account_id);
 CREATE INDEX IF NOT EXISTS idx_contractors_is_active ON contractors(is_active);
 
-CREATE INDEX IF NOT EXISTS idx_contractor_verification_documents_contractor_id ON contractor_verification_documents(contractor_id);
-CREATE INDEX IF NOT EXISTS idx_contractor_verification_documents_document_type ON contractor_verification_documents(document_type);
-CREATE INDEX IF NOT EXISTS idx_contractor_verification_documents_is_verified ON contractor_verification_documents(is_verified);
 
 CREATE INDEX IF NOT EXISTS idx_contractor_bank_accounts_contractor_id ON contractor_bank_accounts(contractor_id);
 CREATE INDEX IF NOT EXISTS idx_contractor_bank_accounts_stripe_bank_account_id ON contractor_bank_accounts(stripe_bank_account_id);
@@ -136,7 +107,6 @@ CREATE INDEX IF NOT EXISTS idx_contractor_addresses_address_type ON contractor_a
 
 -- Enable Row Level Security (RLS)
 ALTER TABLE contractors ENABLE ROW LEVEL SECURITY;
-ALTER TABLE contractor_verification_documents ENABLE ROW LEVEL SECURITY;
 ALTER TABLE contractor_bank_accounts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE contractor_addresses ENABLE ROW LEVEL SECURITY;
 
@@ -153,36 +123,6 @@ CREATE POLICY "Users can update own contractor profile" ON contractors
 CREATE POLICY "Service role can manage all contractors" ON contractors
     FOR ALL USING (current_setting('role') = 'service_role');
 
--- RLS Policies for contractor verification documents
-CREATE POLICY "Users can view own verification documents" ON contractor_verification_documents
-    FOR SELECT USING (
-        EXISTS (
-            SELECT 1 FROM contractors 
-            WHERE contractors.id = contractor_verification_documents.contractor_id 
-            AND contractors.user_id = auth.uid()
-        )
-    );
-
-CREATE POLICY "Users can insert own verification documents" ON contractor_verification_documents
-    FOR INSERT WITH CHECK (
-        EXISTS (
-            SELECT 1 FROM contractors 
-            WHERE contractors.id = contractor_verification_documents.contractor_id 
-            AND contractors.user_id = auth.uid()
-        )
-    );
-
-CREATE POLICY "Users can update own verification documents" ON contractor_verification_documents
-    FOR UPDATE USING (
-        EXISTS (
-            SELECT 1 FROM contractors 
-            WHERE contractors.id = contractor_verification_documents.contractor_id 
-            AND contractors.user_id = auth.uid()
-        )
-    );
-
-CREATE POLICY "Service role can manage all verification documents" ON contractor_verification_documents
-    FOR ALL USING (current_setting('role') = 'service_role');
 
 -- RLS Policies for contractor bank accounts
 CREATE POLICY "Users can view own bank accounts" ON contractor_bank_accounts
@@ -252,10 +192,6 @@ CREATE TRIGGER update_contractors_updated_at
     FOR EACH ROW 
     EXECUTE FUNCTION update_updated_at_column();
 
-CREATE TRIGGER update_contractor_verification_documents_updated_at 
-    BEFORE UPDATE ON contractor_verification_documents 
-    FOR EACH ROW 
-    EXECUTE FUNCTION update_updated_at_column();
 
 CREATE TRIGGER update_contractor_bank_accounts_updated_at 
     BEFORE UPDATE ON contractor_bank_accounts 
@@ -302,9 +238,6 @@ SELECT
     c.kyc_expires_at,
     c.business_name,
     c.business_tax_id,
-    -- Count verification documents
-    COUNT(DISTINCT cvd.id) as total_documents,
-    COUNT(DISTINCT CASE WHEN cvd.is_verified THEN cvd.id END) as verified_documents,
     -- Count bank accounts
     COUNT(DISTINCT cba.id) as total_bank_accounts,
     COUNT(DISTINCT CASE WHEN cba.is_verified THEN cba.id END) as verified_bank_accounts,
@@ -313,7 +246,6 @@ SELECT
     COUNT(DISTINCT CASE WHEN ca.is_verified THEN ca.id END) as verified_addresses
 FROM contractors c
 LEFT JOIN profiles p ON c.profile_id = p.id
-LEFT JOIN contractor_verification_documents cvd ON c.id = cvd.contractor_id
 LEFT JOIN contractor_bank_accounts cba ON c.id = cba.contractor_id
 LEFT JOIN contractor_addresses ca ON c.id = ca.contractor_id
 GROUP BY c.id, c.user_id, p.username, p.full_name, c.contractor_type, c.kyc_status, 
