@@ -13,6 +13,7 @@
   },
   "license": "MIT",
   "dependencies": {
+    "@choochmeque/tauri-plugin-iap-api": "^0.1.9",
     "@stripe/stripe-js": "^4.10.0",
     "@supabase/supabase-js": "^2.52.0",
     "@tailwindcss/vite": "^4.1.11",

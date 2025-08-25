@@ -7,6 +7,36 @@ mod enhanced_store;
 // Stripe payment processing module
 mod stripe;
 
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Serialize, Deserialize)]
+struct PlatformInfo {
+    os: String,
+    arch: String,
+}
+
+#[tauri::command]
+fn get_platform_info() -> PlatformInfo {
+    let target_os = if cfg!(target_os = "ios") {
+        "ios"
+    } else if cfg!(target_os = "android") {
+        "android"
+    } else if cfg!(target_os = "macos") {
+        "macos"
+    } else if cfg!(target_os = "windows") {
+        "windows"
+    } else if cfg!(target_os = "linux") {
+        "linux"
+    } else {
+        std::env::consts::OS
+    };
+
+    PlatformInfo {
+        os: target_os.to_string(),
+        arch: std::env::consts::ARCH.to_string(),
+    }
+}
+
 // Import required for environment variable loading
 #[cfg(not(target_os = "ios"))]
 use dotenv;
@@ -109,11 +139,27 @@ pub fn run() {
     // Load environment variables from .env file with platform-specific handling
     load_environment_variables();
     
-    tauri::Builder::default()
+    let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_http::init())
-        .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_iap::init())
+        .plugin(tauri_plugin_opener::init());
+    
+    // Enable IAP plugin for mobile platforms
+    #[cfg(any(target_os = "ios", target_os = "android"))]
+    {
+        builder = builder.plugin(tauri_plugin_iap::init());
+        #[cfg(debug_assertions)]
+        println!("IAP plugin enabled for mobile platform");
+    }
+    
+    // Disable IAP plugin for desktop platforms to prevent Swift concurrency crashes
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
+    {
+        #[cfg(debug_assertions)]
+        println!("IAP plugin disabled on desktop platforms to prevent Swift concurrency crashes");
+    }
+    
+    builder
         .invoke_handler(tauri::generate_handler![
             // Session management commands
             session::store_tokens,
@@ -188,6 +234,8 @@ pub fn run() {
             // Integrated payment method commands (Stripe + Database)
             stripe::create_and_store_payment_method,
             stripe::store_payment_method_after_setup,
+            // Platform detection command
+            get_platform_info,
             stripe::get_stored_payment_methods,
             stripe::set_default_payment_method_integrated,
             stripe::delete_payment_method_integrated,

@@ -25,7 +25,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tauri-plugin-http = "2.5.1"
 tauri-plugin-store = "2.3.0"
-tauri-plugin-iap = { git = "https://github.com/inKibra/tauri-plugins", subdirectory = "packages/tauri-plugin-iap" }
+tauri-plugin-iap = "0.1.9"
 reqwest = { version = "0.11", features = ["json"] }
 chrono = { version = "0.4.41", features = ["serde"] }
 async-stripe = { version = "0.41.0", features = ["runtime-tokio-hyper"] }
